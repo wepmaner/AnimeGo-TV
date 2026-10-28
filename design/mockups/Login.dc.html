@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Вход</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#ffffff}a:hover{color:#ffffff}
+</style>
+</helmet>
+<div style="width: 1920px; height: 1080px; box-sizing: border-box; overflow: hidden; background: #0e0f13; color: #f2f3f5; font-family: Manrope, system-ui, sans-serif; padding: 0 160px; display: flex; align-items: center; gap: 140px">
+
+  <div style="flex: 1 1 0; display: flex; flex-direction: column; gap: 40px">
+    <div style="font-size: 40px; font-weight: 800; letter-spacing: -0.5px">Anime<span style="color: {{accent}}">Go</span></div>
+    <h1 style="margin: 0; font-size: 60px; line-height: 1.12; font-weight: 800; letter-spacing: -1px">Войдите в аккаунт animego.me</h1>
+    <div style="display: flex; flex-direction: column; gap: 22px; font-size: 24px; color: #c9cdd4">
+      <div style="display: flex; gap: 18px; align-items: center">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="{{accent}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4l12 8-12 8z"></path></svg>
+        «Продолжить просмотр» с того же места
+      </div>
+      <div style="display: flex; gap: 18px; align-items: center">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="{{accent}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>
+        Отметки просмотренных серий
+      </div>
+      <div style="display: flex; gap: 18px; align-items: center">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="{{accent}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="13" height="16" rx="2"></rect><path d="M20 8v12"></path></svg>
+        То же самое на телефоне и компьютере
+      </div>
+    </div>
+  </div>
+
+  <form style="width: 720px; flex-shrink: 0; box-sizing: border-box; padding: 56px; border-radius: 28px; background: #16181e; display: flex; flex-direction: column; gap: 28px">
+    <div style="display: flex; flex-direction: column; gap: 12px">
+      <label for="login" style="font-size: 20px; font-weight: 600; color: #c9cdd4">Логин или e-mail</label>
+      <input id="login" type="text" value="user" style="height: 80px; box-sizing: border-box; padding: 0 28px; border-radius: 16px; border: 0; background: #ffffff; color: #0e0f13; font-family: inherit; font-size: 26px; font-weight: 600; box-shadow: 0 0 0 4px #16181e, 0 0 0 8px {{accent}}">
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 12px">
+      <label for="pass" style="font-size: 20px; font-weight: 600; color: #c9cdd4">Пароль</label>
+      <input id="pass" type="password" value="" placeholder="••••••••" style="height: 80px; box-sizing: border-box; padding: 0 28px; border-radius: 16px; border: 2px solid #2e323c; background: #0e0f13; color: #f2f3f5; font-family: inherit; font-size: 26px">
+    </div>
+    <div style="font-size: 19px; color: #a3a9b4; line-height: 1.45">Наберите с экранной клавиатуры. Вход запомнится, вводить второй раз не придётся.</div>
+    <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 8px">
+      <button type="submit" style="height: 80px; border-radius: 16px; border: 0; background: {{accent}}; color: #ffffff; font-family: inherit; font-size: 26px; font-weight: 800">Войти</button>
+      <button type="button" style="height: 80px; border-radius: 16px; border: 0; background: #22252d; color: #f2f3f5; font-family: inherit; font-size: 24px; font-weight: 600">Продолжить без входа</button>
+    </div>
+    <div style="font-size: 18px; color: #a3a9b4; line-height: 1.45">Без входа работают каталог, поиск и просмотр. Войти можно позже: кнопка «Войти» вверху главной.</div>
+  </form>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#e5484d","options":["#e5484d","#f97316","#3b82f6","#a855f7"]},"$preview":{"width":1920,"height":1080}}'>
+class Component extends DCLogic {
+renderVals() {
+return { accent: this.props.accent ?? '#e5484d' };
+}
+}
+</script>
+</body>
+</html>

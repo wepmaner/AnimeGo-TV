@@ -1,0 +1,348 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using AnimeGo.Core;
+
+namespace AnimeGo.Tv
+{
+    // Главная (спека §5.2, макет Main.dc.html): шапка и ряды «Продолжить просмотр», «Давно не смотрели», «Жанры»,
+    // «Новые серии · сезон», «Онгоинги», «ТОП-250». Пустые ряды не показываются, гость видит ряды с третьего.
+    // ↑↓ — между шапкой и рядами, ←→ — внутри, фокус в каждом ряду свой. «Назад» — выход из приложения.
+    sealed class HomeScreen : IScreen
+    {
+        const int SectionGap = 40, ContentBottom = Theme.H - 40;
+        const int MaxBadgeChecks = 3;   // запросов /player за загрузку ради метки «Новая серия»
+        static readonly (string Title, string Url)[] GenreList =
+        {
+            ("Экшен", "/anime/genre/action"), ("Комедия", "/anime/genre/comedy"), ("Романтика", "/anime/genre/romance"),
+            ("Фэнтези", "/anime/genre/fantasy"), ("Приключения", "/anime/genre/adventure"), ("Сёнэн", "/anime/genre/shounen"),
+            ("Ужасы", "/anime/genre/horror"), ("Детектив", "/anime/genre/mystery"), ("ТОП-250", "/anime/top-250"),
+        };
+
+        readonly App app;
+        readonly Widgets ui;
+        readonly HomeHeader header;
+        readonly Row cont, stale, genres, season, ongoing, top;
+        readonly Row[] rows;
+        readonly Dictionary<int, int> newEpisode = new Dictionary<int, int>();   // animeId → номер вышедшей серии
+        MessageView overlay;   // «Загрузка…» / «Нет связи» поверх экрана до первой удачной загрузки
+        LogoutPopup popup;
+        int focusRow = -1;     // −1 — шапка
+        int scrollY, generation;
+        bool alive, extrasStarted;
+
+        public HomeScreen(App app)
+        {
+            this.app = app;
+            ui = new Widgets(app.Win);
+            ui.Rect(0, 0, Theme.W, Theme.H, Theme.Bg);
+            cont = new Row(ui, app.Images, 0, 400, 225, 32, RuText.Continue) { OnOk = OpenContinue };
+            stale = new Row(ui, app.Images, 0, 140, 196, 32, RuText.Stale, RuText.StaleHint) { OnOk = OpenContinue };
+            genres = new Row(ui, app.Images, 0, 0, 64, 16, RuText.Genres) { OnOk = OpenGenre };
+            season = new Row(ui, app.Images, 0, 140, 196, 32, RuText.NewEpisodes) { OnOk = OpenTitle };
+            ongoing = new Row(ui, app.Images, 0, 140, 196, 32, RuText.Ongoing) { OnOk = OpenTitle };
+            top = new Row(ui, app.Images, 0, 140, 196, 32, RuText.Top) { OnOk = OpenTitle };
+            rows = new[] { cont, stale, genres, season, ongoing, top };
+            header = new HomeHeader(ui, app.User?.Name);
+        }
+
+        public void Show()
+        {
+            alive = true;
+            header.SetActive(true);
+            Load();
+        }
+
+        public void Hide()
+        {
+            alive = false;
+            overlay?.Hide();
+            overlay = null;
+            ui.Dispose();
+        }
+
+        public bool OnKey(string key)
+        {
+            if (overlay != null) return overlay.OnKey(key);   // «Повторить» / «Назад» — выход
+            if (popup != null) return popup.OnKey(key);
+            switch (key)
+            {
+                case Keys.Back: app.Exit(); return true;
+                case Keys.Up: MoveRow(-1); return true;
+                case Keys.Down: MoveRow(1); return true;
+                case Keys.Left: MoveItem(-1); return true;
+                case Keys.Right: MoveItem(1); return true;
+                case Keys.Ok: Ok(); return true;
+            }
+            return false;
+        }
+
+        // ---- данные ----
+
+        // Главная страница сайта. До первой удачной загрузки поверх экрана сообщение.
+        void Load()
+        {
+            var n = ++generation;
+            ShowOverlay(new MessageView(app, RuText.Loading, null, app.Exit));   // «Назад» — выход и во время загрузки
+            Task.Run(async () =>
+            {
+                HomePage home = null;
+                string why = null;
+                try { home = HomeParser.Parse(await app.Api.GetHtmlAsync("/").ConfigureAwait(false)); }
+                catch (Exception e) { why = e is ApiException a ? a.Kind + " " + a.Message : e.GetType().Name + " " + e.Message; }
+                App.Ui(() =>
+                {
+                    if (!alive || n != generation) return;
+                    if (home != null) { Render(home); return; }
+                    DevLog.Write("home: ошибка " + why);
+                    ShowOverlay(new MessageView(app, RuText.NoConnection, Load, app.Exit));   // Split не зовём: данных нет
+                });
+            });
+        }
+
+        void Render(HomePage home)
+        {
+            ShowOverlay(null);
+            app.User = home.User;   // сайт знает лучше: сессия могла кончиться или whoami не дошёл
+            IReadOnlyList<ContinueCard> active = new ContinueCard[0], old = new ContinueCard[0];
+            if (app.User != null)
+            {
+                // Пустой список при входе — скорее сменилась разметка или сессия полуживая, чем всё досмотрено:
+                // Split тогда стёр бы все записи «виденного», поэтому его не зовём.
+                if (home.Continue != null && home.Continue.Count > 0)
+                {
+                    var split = ContinueModel.Split(home.Continue, app.Prefs, app.UserKey, DateTime.UtcNow);
+                    active = split.Active;
+                    old = split.Stale;
+                }
+                else DevLog.Write("home: continue empty, seen untouched");
+                app.Prefs.Cookies = app.Jar.Export();   // сайт мог обновить куки сессии
+                app.SavePrefs();
+            }
+            header.Build(app.User?.Name);
+            cont.SetItems(active.Select(ContinueItem).ToList());
+            stale.SetItems(old.Select(c => new RowItem { Title = c.Title, Subtitle = RuText.Episode(c.EpisodeNumber), ImageUrl = c.FrameUrl, Tag = c }).ToList());
+            genres.SetItems(GenreList.Select(g => new RowItem { Title = g.Title, Tag = g.Url }).ToList());
+            var when = SeasonName(home.SeasonTitle);
+            season.SetTitle(when == null ? RuText.NewEpisodes : RuText.NewEpisodes + " · " + when);
+            season.SetItems(Posters(home.Season));
+            DevLog.Write("home: continue " + active.Count + ", stale " + old.Count + ", season " + season.Items.Count + (app.User == null ? " (гость)" : ""));
+
+            focusRow = FirstRow();
+            ApplyFocus();
+            if (app.PendingToast != null) { Toast.Show(ui, app.PendingToast); app.PendingToast = null; }
+            CheckNewEpisodes(active);
+            LoadExtras();
+        }
+
+        static RowItem ContinueItem(ContinueCard c) => new RowItem
+        {
+            Title = c.Title,
+            Subtitle = RuText.Episode(c.EpisodeNumber),   // озвучку не пишем: в настройках только её ключ, без названия
+            ImageUrl = c.FrameUrl,
+            Progress = c.DurationSec > 0 ? c.Progress : -1,
+            TimeLabel = c.DurationSec > 0 ? RuText.Time(c.PositionSec) + " / " + RuText.Time(c.DurationSec) : null,
+            Tag = c,
+        };
+
+        static List<RowItem> Posters(IReadOnlyList<AnimeCard> cards) =>
+            (cards ?? new AnimeCard[0]).Select(a => new RowItem { Title = a.Title, ImageUrl = a.PosterUrl, Tag = a }).ToList();
+
+        // «Аниме осеннего сезона» → «осень 2026».
+        static string SeasonName(string siteTitle)
+        {
+            var t = (siteTitle ?? "").ToLowerInvariant();
+            var name = t.Contains("осен") ? "осень" : t.Contains("зим") ? "зима" : t.Contains("весен") ? "весна" : t.Contains("лет") ? "лето" : null;
+            return name == null ? null : name + " " + DateTime.Now.Year;
+        }
+
+        // «Новая серия»: досмотренные почти до конца карточки — есть ли на сайте серия дальше. В фоне, не больше трёх.
+        void CheckNewEpisodes(IReadOnlyList<ContinueCard> active)
+        {
+            var n = generation;
+            foreach (var c in active.Where(c => c.Progress >= 0.8).Take(MaxBadgeChecks))
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        var info = await app.Api.PlayerAsync(c.AnimeId).ConfigureAwait(false);
+                        var next = info.Episodes.Where(e => e.Number > c.EpisodeNumber).Select(e => e.Number).DefaultIfEmpty(0).Min();
+                        DevLog.Write("badge: anime " + c.AnimeId + " ep " + c.EpisodeNumber + " → " + (next > 0 ? "новая " + next : "нет"));
+                        if (next == 0) return;
+                        App.Ui(() =>
+                        {
+                            var index = cont.Items.ToList().FindIndex(i => i.Tag == c);
+                            if (!alive || n != generation || index < 0 || cont.Items[index].Badge != null) return;
+                            newEpisode[c.AnimeId] = next;
+                            cont.Items[index].Badge = RuText.NewEpisodeBadge;
+                            cont.AddBadge(index);
+                            Layout();
+                        });
+                    }
+                    catch (Exception e) { DevLog.Write("badge: anime " + c.AnimeId + " " + e.GetType().Name + " " + e.Message); }
+                });
+        }
+
+        // Ряды ниже макета — после главной, по очереди, чтобы не мешать ей.
+        void LoadExtras()
+        {
+            if (extrasStarted) return;
+            extrasStarted = true;
+            Task.Run(async () =>
+            {
+                await LoadRow(ongoing, "/anime/status/ongoing", "ongoing").ConfigureAwait(false);
+                await LoadRow(top, "/anime/top-250", "top").ConfigureAwait(false);
+            });
+        }
+
+        async Task LoadRow(Row row, string url, string name)
+        {
+            try
+            {
+                var cards = CatalogParser.Cards(await app.Api.GetHtmlAsync(url).ConfigureAwait(false));
+                DevLog.Write("home: " + name + " " + cards.Count);
+                App.Ui(() =>
+                {
+                    if (!alive) return;
+                    row.SetItems(Posters(cards));
+                    Layout();
+                });
+            }
+            catch (Exception e) { DevLog.Write("home: " + name + " " + e.GetType().Name + " " + e.Message); }
+        }
+
+        // ---- раскладка и фокус ----
+
+        // Ряды сверху вниз с зазором 40; прокрутка — чтобы ряд в фокусе был целиком между шапкой и низом экрана.
+        void Layout()
+        {
+            var y = HomeHeader.Bottom;
+            foreach (var r in rows)
+            {
+                r.Y = y;
+                if (!r.IsEmpty) y += r.Height + SectionGap;
+            }
+            if (focusRow < 0) scrollY = 0;
+            else
+            {
+                var r = rows[focusRow];
+                if (r.Y + r.Height - scrollY > ContentBottom) scrollY = r.Y + r.Height - ContentBottom;
+                if (r.Y - scrollY < HomeHeader.Bottom) scrollY = r.Y - HomeHeader.Bottom;
+            }
+            foreach (var r in rows) r.Place(scrollY);
+            header.Raise();
+            popup?.Raise();
+            Toast.Raise();
+        }
+
+        void ApplyFocus()
+        {
+            header.SetActive(focusRow < 0);
+            for (var i = 0; i < rows.Length; i++) rows[i].SetActive(i == focusRow);
+            Layout();
+        }
+
+        int FirstRow()
+        {
+            for (var i = 0; i < rows.Length; i++) if (!rows[i].IsEmpty) return i;
+            return -1;
+        }
+
+        void MoveRow(int d)
+        {
+            var next = focusRow;
+            do next += d; while (next >= 0 && next < rows.Length && rows[next].IsEmpty);
+            if (next >= rows.Length) return;
+            if (next < 0) next = -1;
+            if (next == focusRow) return;
+            focusRow = next;
+            ApplyFocus();
+            DevLog.Write(focusRow < 0 ? "focus: header " + header.Focus : "focus: row " + focusRow + " item " + rows[focusRow].Focus);
+        }
+
+        void MoveItem(int d)
+        {
+            if (focusRow < 0) header.Move(d); else rows[focusRow].Move(d);
+        }
+
+        void Ok()
+        {
+            if (focusRow >= 0) { rows[focusRow].Ok(); return; }
+            var i = header.Focus;
+            if (i == 0) return;   // мы и так на «Главной»
+            if (i < HomeHeader.UserItem) { OpenTab(i); return; }
+            if (app.User == null) { app.Navigate(new LoginScreen(app)); return; }
+            popup = new LogoutPopup(ui, Logout, ClosePopup);
+        }
+
+        // ---- действия ----
+
+        void OpenContinue(RowItem it)
+        {
+            var c = (ContinueCard)it.Tag;
+            int ep = c.EpisodeNumber, pos = c.PositionSec;
+            if (it.Badge != null && newEpisode.TryGetValue(c.AnimeId, out var next)) { ep = next; pos = 0; }   // новая серия — с начала
+            DevLog.Write("open: anime " + c.AnimeId + " ep " + ep + " pos " + pos);
+            var url = "/anime/" + c.Slug + "-" + c.AnimeId;
+            app.Open(new PlayerScreen(app, c.AnimeId, url, ep, pos), () => new HomeScreen(app));
+        }
+
+        void OpenTitle(RowItem it)
+        {
+            var a = (AnimeCard)it.Tag;
+            DevLog.Write("open: title " + a.Id + " " + a.Url);
+            // Тайтл есть в «Продолжить» — «Смотреть» начнёт с позиции сайта, а не только с «виденного» на ТВ.
+            var resume = cont.Items.Concat(stale.Items).Select(i => i.Tag).OfType<ContinueCard>().FirstOrDefault(c => c.AnimeId == a.Id);
+            app.Open(new TitleScreen(app, a.Id, a.Url, resume), () => new HomeScreen(app));
+        }
+
+        void OpenGenre(RowItem it)
+        {
+            DevLog.Write("open: grid " + it.Tag + " " + it.Title);
+            OpenGrid(GridSource.Catalog((string)it.Tag, it.Title));
+        }
+
+        // Вкладки шапки: 1 — «Поиск», 2 — «Мой список» (гостю — вход), 3 — «Каталог».
+        void OpenTab(int i)
+        {
+            DevLog.Write("open: tab " + HomeHeader.Tabs[i]);
+            if (i == 1) OpenGrid(GridSource.Search());
+            else if (i == 3) OpenGrid(GridSource.Catalog("/anime", RuText.Catalog));
+            else if (app.User == null) app.Navigate(new LoginScreen(app));
+            else OpenGrid(GridSource.List());
+        }
+
+        void OpenGrid(GridSource src) => app.Open(new GridScreen(app, src), () => new HomeScreen(app));
+
+        void Logout()
+        {
+            ClosePopup();
+            DevLog.Write("logout");
+            var _ = app.Api.LogoutAsync();
+            app.User = null;
+            app.Prefs.Cookies = null;
+            app.SavePrefs();
+            generation++;   // ответы «Новой серии» для прежнего аккаунта больше не нужны
+            newEpisode.Clear();
+            cont.SetItems(new RowItem[0]);
+            stale.SetItems(new RowItem[0]);
+            header.Build(null);
+            focusRow = FirstRow();   // фокус был на шапке («Выйти»): на первый непустой ряд, как после загрузки
+            ApplyFocus();
+        }
+
+        void ClosePopup()
+        {
+            popup?.Close();
+            popup = null;
+        }
+
+        void ShowOverlay(MessageView next)
+        {
+            overlay?.Hide();
+            overlay = next;
+            overlay?.Show();
+        }
+    }
+}

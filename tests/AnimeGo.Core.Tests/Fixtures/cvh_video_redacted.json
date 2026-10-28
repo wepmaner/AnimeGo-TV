@@ -1,0 +1,19 @@
+{
+ "unitedVideoId": 15266286492336,
+ "duration": 1440,
+ "failoverHost": "vd368.okcdn.ru",
+ "thumbUrl": "https://iv.okcdn.ru/videoPreview?REDACTED",
+ "sources": {
+  "hlsUrl": "https://vd749.okcdn.ru/video.m3u8?REDACTED",
+  "dashUrl": "https://vd749.okcdn.ru/?REDACTED",
+  "mpegQhdUrl": "",
+  "mpeg2kUrl": "",
+  "mpeg4kUrl": "",
+  "mpegHighUrl": "https://vd749.okcdn.ru/?REDACTED",
+  "mpegFullHdUrl": "https://vd749.okcdn.ru/?REDACTED",
+  "mpegMediumUrl": "https://vd749.okcdn.ru/?REDACTED",
+  "mpegLowUrl": "https://vd749.okcdn.ru/?REDACTED",
+  "mpegLowestUrl": "https://vd749.okcdn.ru/?REDACTED",
+  "mpegTinyUrl": "https://vd749.okcdn.ru/?REDACTED"
+ }
+}

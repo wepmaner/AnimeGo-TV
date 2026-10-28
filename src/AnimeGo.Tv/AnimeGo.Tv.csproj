@@ -1,0 +1,18 @@
+<Project Sdk="Tizen.NET.Sdk/1.2.1">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>tizen60</TargetFramework>
+    <TizenNetPackageVersion>6.0.0.14995</TizenNetPackageVersion>
+    <LangVersion>8.0</LangVersion>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <DefineConstants>$(DefineConstants);DEVLOG</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AnimeGo.Core\AnimeGo.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="SixLabors.ImageSharp" Version="2.1.9" />
+  </ItemGroup>
+</Project>
