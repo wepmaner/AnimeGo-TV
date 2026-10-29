@@ -49,7 +49,7 @@
    ```bash
    TV=<ip-тв>:26101 scripts/deploy.sh Release
    ```
-4. На телевизоре: *Apps* → ⚙ → **AnimeGo** → *Добавить на главный экран*.
+4. На телевизоре: *Apps* → ⚙ → **AnimeGoTV** → *Добавить на главный экран*.
 
 Если новый телевизор не принимает `.tpk`, поднимите `api-version` в `src/AnimeGo.Tv/tizen-manifest.xml`. После смены значка поднимите `version` и переустановите приложение (`sdb uninstall ru.animego.tv` — вход в приложении при этом тоже сотрётся).
 

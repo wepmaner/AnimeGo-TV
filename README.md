@@ -49,7 +49,7 @@
    ```bash
    TV=<tv-ip>:26101 scripts/deploy.sh Release
    ```
-4. On the TV: *Apps* → ⚙ → **AnimeGo** → *Add to Home*.
+4. On the TV: *Apps* → ⚙ → **AnimeGoTV** → *Add to Home*.
 
 If a newer TV refuses the `.tpk`, raise `api-version` in `src/AnimeGo.Tv/tizen-manifest.xml`. After changing the icon, bump `version` and reinstall (`sdb uninstall ru.animego.tv` — this also clears the app's login).
 
