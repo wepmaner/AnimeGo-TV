@@ -13,12 +13,9 @@ namespace AnimeGo.Tv
     {
         const int SectionGap = 40, ContentBottom = Theme.H - 40;
         const int MaxBadgeChecks = 3;   // запросов /player за загрузку ради метки «Новая серия»
-        static readonly (string Title, string Url)[] GenreList =
-        {
-            ("Экшен", "/anime/genre/action"), ("Комедия", "/anime/genre/comedy"), ("Романтика", "/anime/genre/romance"),
-            ("Фэнтези", "/anime/genre/fantasy"), ("Приключения", "/anime/genre/adventure"), ("Сёнэн", "/anime/genre/shounen"),
-            ("Ужасы", "/anime/genre/horror"), ("Детектив", "/anime/genre/mystery"), ("ТОП-250", "/anime/top-250"),
-        };
+        const string TopUrl = "/anime/top-250", TopTitle = "ТОП-250";
+        // Ряд «Жанры»: жанры каталога (без «Все аниме») и ТОП-250 в конце.
+        static readonly string[] GenreRow = { "Экшен", "Комедия", "Романтика", "Фэнтези", "Приключения", "Сёнен", "Ужасы", "Детектив" };
 
         readonly App app;
         readonly Widgets ui;
@@ -37,12 +34,12 @@ namespace AnimeGo.Tv
             this.app = app;
             ui = new Widgets(app.Win);
             ui.Rect(0, 0, Theme.W, Theme.H, Theme.Bg);
-            cont = new Row(ui, app.Images, 0, 400, 225, 32, RuText.Continue) { OnOk = OpenContinue };
-            stale = new Row(ui, app.Images, 0, 140, 196, 32, RuText.Stale, RuText.StaleHint) { OnOk = OpenContinue };
+            cont = new Row(ui, app.Images, 0, 480, 270, 32, RuText.Continue) { OnOk = OpenContinue };
+            stale = new Row(ui, app.Images, 0, 200, 280, 32, RuText.Stale, RuText.StaleHint) { OnOk = OpenContinue };
             genres = new Row(ui, app.Images, 0, 0, 64, 16, RuText.Genres) { OnOk = OpenGenre };
-            season = new Row(ui, app.Images, 0, 140, 196, 32, RuText.NewEpisodes) { OnOk = OpenTitle };
-            ongoing = new Row(ui, app.Images, 0, 140, 196, 32, RuText.Ongoing) { OnOk = OpenTitle };
-            top = new Row(ui, app.Images, 0, 140, 196, 32, RuText.Top) { OnOk = OpenTitle };
+            season = new Row(ui, app.Images, 0, 200, 280, 32, RuText.NewEpisodes) { OnOk = OpenTitle };
+            ongoing = new Row(ui, app.Images, 0, 200, 280, 32, RuText.Ongoing) { OnOk = OpenTitle };
+            top = new Row(ui, app.Images, 0, 200, 280, 32, RuText.Top) { OnOk = OpenTitle };
             rows = new[] { cont, stale, genres, season, ongoing, top };
             header = new HomeHeader(ui, app.User?.Name);
         }
@@ -123,7 +120,8 @@ namespace AnimeGo.Tv
             header.Build(app.User?.Name);
             cont.SetItems(active.Select(ContinueItem).ToList());
             stale.SetItems(old.Select(c => new RowItem { Title = c.Title, Subtitle = RuText.Episode(c.EpisodeNumber), ImageUrl = c.FrameUrl, Tag = c }).ToList());
-            genres.SetItems(GenreList.Select(g => new RowItem { Title = g.Title, Tag = g.Url }).ToList());
+            genres.SetItems(GenreRow.Select(t => new RowItem { Title = t, Tag = Array.FindIndex(Genres.All, g => g.Title == t) })
+                .Append(new RowItem { Title = TopTitle, Tag = -1 }).ToList());
             var when = SeasonName(home.SeasonTitle);
             season.SetTitle(when == null ? RuText.NewEpisodes : RuText.NewEpisodes + " · " + when);
             season.SetItems(Posters(home.Season));
@@ -299,8 +297,9 @@ namespace AnimeGo.Tv
 
         void OpenGenre(RowItem it)
         {
-            DevLog.Write("open: grid " + it.Tag + " " + it.Title);
-            OpenGrid(GridSource.Catalog((string)it.Tag, it.Title));
+            var genre = (int)it.Tag;
+            DevLog.Write("open: grid " + (genre < 0 ? TopUrl : Genres.All[genre].Url) + " " + it.Title);
+            OpenGrid(genre < 0 ? GridSource.Catalog(TopUrl, TopTitle) : GridSource.Catalog(genre, false));
         }
 
         // Вкладки шапки: 1 — «Поиск», 2 — «Мой список» (гостю — вход), 3 — «Каталог».
@@ -308,7 +307,7 @@ namespace AnimeGo.Tv
         {
             DevLog.Write("open: tab " + HomeHeader.Tabs[i]);
             if (i == 1) OpenGrid(GridSource.Search());
-            else if (i == 3) OpenGrid(GridSource.Catalog("/anime", RuText.Catalog));
+            else if (i == 3) OpenGrid(GridSource.Catalog(0, true));
             else if (app.User == null) app.Navigate(new LoginScreen(app));
             else OpenGrid(GridSource.List());
         }

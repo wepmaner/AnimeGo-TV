@@ -16,8 +16,8 @@ namespace AnimeGo.Tv
     }
 
     // Горизонтальный ряд под заголовком (макет Main.dc.html). Вид карточки по размеру:
-    // широкая (кадр 400×225: полоса прогресса, время, метка, название 22 px и подпись 18 px),
-    // узкая (постер 140×196: название 17 px и подпись 15 px), cardW = 0 — кнопки-«таблетки» по ширине текста (жанры).
+    // широкая (кадр 480×270: полоса прогресса, время, метка, название 24 px и подпись 20 px),
+    // узкая (постер 200×280: название 20 px и подпись 17 px), cardW = 0 — кнопки-«таблетки» по ширине текста (жанры).
     // Y — место ряда в общем содержимом главной; вертикальный сдвиг передаёт экран в Place(scrollY).
     // Горизонтально ряд сдвигается сам, чтобы карточка в фокусе не уходила за поле 80 px.
     sealed class Row
@@ -47,7 +47,7 @@ namespace AnimeGo.Tv
         public Action<RowItem> OnOk;
         public IReadOnlyList<RowItem> Items => items;
         public bool IsEmpty => items.Count == 0;
-        public int Height => HeadH + cardH + (cardW == 0 ? 0 : Wide ? 14 + 30 + 4 + 26 : 10 + 23 + 4 + 20);
+        public int Height => HeadH + cardH + (cardW == 0 ? 0 : Wide ? 14 + 32 + 4 + 28 : 10 + 27 + 4 + 24);
         bool Wide => cardW >= 300;
         int Radius => cardW == 0 || Wide ? 14 : 10;   // как в макете: кнопки и кадры 14, постеры 10
 
@@ -167,13 +167,13 @@ namespace AnimeGo.Tv
 
             if (Wide)
             {
-                AddLine(it.Title, 22, Theme.TextHex, true, x, cardH + 14, 32);
-                AddLine(it.Subtitle, 18, Theme.MutedHex, false, x, cardH + 14 + 30 + 4, 28);
+                AddLine(it.Title, 24, Theme.TextHex, true, x, cardH + 14, 34);
+                AddLine(it.Subtitle, 20, Theme.MutedHex, false, x, cardH + 14 + 32 + 4, 30);
             }
             else
             {
-                AddLine(it.Title, 17, PosterTitleHex, false, x, cardH + 10, 26);
-                AddLine(it.Subtitle, 15, DimHex, false, x, cardH + 10 + 23 + 4, 22);
+                AddLine(it.Title, 20, PosterTitleHex, false, x, cardH + 10, 30);
+                AddLine(it.Subtitle, 17, DimHex, false, x, cardH + 10 + 27 + 4, 26);
             }
         }
 

@@ -4,21 +4,23 @@ using ElmSharp;
 
 namespace AnimeGo.Tv
 {
-    // Сетка постеров 140×196 по 10 в строке (зазор 32, поля 80), под постером название 17 px — как узкие карточки Row.
-    // Прокрутка построчная: верхняя видимая строка всегда целиком ниже Top, нижние могут уходить за край экрана.
+    // Сетка постеров 250×350 (родной размер постеров сайта) в Cols колонок на ширине Width от Left; под постером
+    // название 20 px, на постере — рейтинг. Прокрутка построчная: верхняя видимая строка всегда целиком ниже Top,
+    // нижние уходят за край экрана — край следующей строки видно, и понятно, что ниже есть ещё.
     // Строки выше видимой прячутся — поэтому шапке экрана не нужен фон поверх сетки.
     // Постеры запрашиваются лениво: только для строк в пределах NearRows от видимых.
     sealed class Grid
     {
-        public const int Cols = 10, CardW = 140, CardH = 196, Gap = 32, Radius = 10;
-        const int CellH = CardH + 10 + 26, Pitch = CellH + Gap, Bottom = Theme.H - 40;
+        public const int CardW = 250, CardH = 350, Radius = 14;
+        const int CellH = CardH + 12 + 30, Pitch = CellH + 34, Bottom = Theme.H - 40;
         const int NearRows = 2;
         const string TitleHex = "#d5d8de";
+        static readonly Color Shade = Color.FromRgba(14, 15, 19, 210);
 
         sealed class Cell
         {
             public RowItem Item;
-            public EvasObject Back, Pic, Title;
+            public EvasObject Back, Pic, Title, BadgeBack, BadgeText;
             public bool Requested, Shown;
             public int X = int.MinValue, Y = int.MinValue;   // где стоит сейчас
         }
@@ -31,23 +33,30 @@ namespace AnimeGo.Tv
         int placedRow = -1, placedCount;   // с какими firstRow и числом карточек раскладывали в прошлый раз
         bool active;
 
-        public readonly int Top;
+        public readonly int Top, Left, Cols;
+        readonly int step;   // шаг колонок: карточка + зазор
         public int Focus { get; private set; }
         public int Count => cells.Count;
         public int FocusRow => Focus / Cols;
         public int RowCount => (cells.Count + Cols - 1) / Cols;
         public RowItem Current => cells.Count == 0 ? null : cells[Focus].Item;
 
-        public Grid(Widgets ui, ImageCache images, int top)
+        public Grid(Widgets ui, ImageCache images, int top, int left = Theme.Margin, int width = Theme.W - 2 * Theme.Margin, int cols = 6)
         {
             this.ui = ui;
             this.images = images;
             Top = top;
+            Left = left;
+            Cols = cols;
+            step = CardW + (width - cols * CardW) / (cols - 1);
         }
+
+        // Где кончается последняя строка на экране (под ней — «Загрузка…»).
+        public int EndY => Top + (RowCount - firstRow) * Pitch - 34;
 
         public void Clear()
         {
-            foreach (var c in cells) { ui.Remove(c.Back); ui.Remove(c.Pic); ui.Remove(c.Title); }
+            foreach (var c in cells) foreach (var o in Parts(c)) ui.Remove(o);
             cells.Clear();
             ui.Remove(frame);
             frame = null;
@@ -65,9 +74,14 @@ namespace AnimeGo.Tv
                 var c = new Cell { Item = it };
                 c.Back = ui.RoundRect(0, 0, CardW, CardH, Radius, Theme.Card, false);
                 c.Pic = ui.Picture(0, 0, CardW, CardH, false);
-                var t = ui.Text(0, 0, CardW, 26, Theme.T(it.Title, 17, TitleHex), false);
+                var t = ui.Text(0, 0, CardW, 30, Theme.T(it.Title, 20, TitleHex, true), false);
                 t.IsEllipsis = true;
                 c.Title = t;
+                if (!string.IsNullOrEmpty(it.Badge))
+                {
+                    c.BadgeBack = ui.RoundRect(0, 0, BadgeW(it.Badge), 32, 10, Shade, false);
+                    c.BadgeText = ui.Text(0, 0, BadgeW(it.Badge), 28, Theme.T(it.Badge, 18, bold: true, align: "center"), false);
+                }
                 cells.Add(c);
             }
             Place();
@@ -125,19 +139,21 @@ namespace AnimeGo.Tv
                     var visible = row >= firstRow && y < Theme.H;
                     if (!visible)
                     {
-                        if (c.Shown) { c.Back.Hide(); c.Pic.Hide(); c.Title.Hide(); c.Shown = false; }
+                        if (c.Shown) { foreach (var o in Parts(c)) o.Hide(); c.Shown = false; }
                         continue;
                     }
-                    var x = Theme.Margin + i % Cols * (CardW + Gap);
+                    var x = Left + i % Cols * step;
                     if (x != c.X || y != c.Y)
                     {
                         c.Back.Move(x, y);   // Polygon сдвигается целиком, как в Row
                         c.Pic.Move(x, y);
-                        c.Title.Move(x, y + CardH + 10);
+                        c.Title.Move(x, y + CardH + 12);
+                        c.BadgeBack?.Move(x + 12, y + 12);
+                        c.BadgeText?.Move(x + 12, y + 14);
                         c.X = x;
                         c.Y = y;
                     }
-                    if (!c.Shown) { c.Back.Show(); c.Pic.Show(); c.Title.Show(); c.Shown = true; }
+                    if (!c.Shown) { foreach (var o in Parts(c)) o.Show(); c.Shown = true; }
                 }
                 placedRow = firstRow;
                 placedCount = cells.Count;
@@ -161,6 +177,16 @@ namespace AnimeGo.Tv
             }
         }
 
+        static IEnumerable<EvasObject> Parts(Cell c)
+        {
+            yield return c.Back;
+            yield return c.Pic;
+            yield return c.Title;
+            if (c.BadgeBack != null) { yield return c.BadgeBack; yield return c.BadgeText; }
+        }
+
+        static int BadgeW(string text) => 22 + 11 * text.Length;
+
         void UpdateFrame()
         {
             if (frame == null) return;
@@ -168,7 +194,7 @@ namespace AnimeGo.Tv
             if (on)
             {
                 var y = Top + (FocusRow - firstRow) * Pitch;
-                ui.MoveFocus(frame, Theme.Margin + Focus % Cols * (CardW + Gap), y, CardW, CardH);
+                ui.MoveFocus(frame, Left + Focus % Cols * step, y, CardW, CardH);
             }
             ui.ShowFocus(frame, on);
         }

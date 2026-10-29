@@ -7,22 +7,44 @@ using ElmSharp;
 
 namespace AnimeGo.Tv
 {
-    // Что показывает сетка. FirstPageUrl null — поиск; MyList — «Мой список» с вкладками.
-    // Query, Tab и Focus — состояние, с которым экран пересоздаётся по «Назад» со страницы тайтла.
+    // Что показывает сетка. FirstPageUrl null — поиск; MyList — «Мой список» с вкладками; Browse — каталог со списком
+    // жанров слева (Genre — индекс в Genres.All). Query, Tab, Genre и Focus — состояние, с которым экран пересоздаётся
+    // по «Назад» со страницы тайтла.
     sealed class GridSource
     {
         public string Title;
         public string FirstPageUrl;
         public bool MyList;
+        public bool Browse;
+        public bool StartInSide;   // каталог из шапки: фокус сначала в списке жанров
         public string Query;
         public int Tab;
+        public int Genre;
         public int Focus;
 
         public bool IsSearch => FirstPageUrl == null && !MyList;
 
         public static GridSource Search() => new GridSource { Title = RuText.Search };
         public static GridSource Catalog(string url, string title) => new GridSource { Title = title, FirstPageUrl = url };
+        public static GridSource Catalog(int genre, bool startInSide) => new GridSource
+        {
+            Title = Genres.All[genre].Title, FirstPageUrl = Genres.All[genre].Url, Browse = true, Genre = genre, StartInSide = startInSide,
+        };
         public static GridSource List(int tab = 0) => new GridSource { Title = RuText.MyList, MyList = true, Tab = tab, FirstPageUrl = MyListTabs.Url(tab) };
+    }
+
+    // Список каталога: «Все аниме» и жанры сайта (/anime/genre/{slug}).
+    static class Genres
+    {
+        public static readonly (string Title, string Url)[] All =
+        {
+            ("Все аниме", "/anime"), ("Экшен", "/anime/genre/action"), ("Приключения", "/anime/genre/adventure"),
+            ("Комедия", "/anime/genre/comedy"), ("Драма", "/anime/genre/drama"), ("Фэнтези", "/anime/genre/fantasy"),
+            ("Фантастика", "/anime/genre/sci-fi"), ("Романтика", "/anime/genre/romance"), ("Повседневность", "/anime/genre/slice-of-life"),
+            ("Сверхъестественное", "/anime/genre/supernatural"), ("Детектив", "/anime/genre/mystery"), ("Триллер", "/anime/genre/suspense"),
+            ("Ужасы", "/anime/genre/horror"), ("Спорт", "/anime/genre/sports"), ("Исекай", "/anime/genre/isekai"),
+            ("Сёнен", "/anime/genre/shounen"), ("Сэйнэн", "/anime/genre/seinen"),
+        };
     }
 
     // Вкладки «Моего списка» в порядке сайта и их type в /profile/?type=N.
@@ -34,18 +56,24 @@ namespace AnimeGo.Tv
         public static string Url(int tab) => "/profile/?type=" + All[tab].Type;
     }
 
-    // Каталог / жанр / поиск / «Мой список» (спека §5.3–5.4): заголовок, для списка — вкладки, для поиска — строка запроса,
-    // ниже сетка постеров. Следующая страница — когда фокус дошёл до последней строки. «Назад» — на прежний экран.
+    // Каталог / поиск / «Мой список» (спека §5.3–5.4): заголовок, для списка — вкладки, для поиска — строка запроса,
+    // ниже сетка постеров по 6 в ряд. Каталог (Browse) — слева список жанров, справа сетка по 5.
+    // Следующая страница грузится заранее, когда до конца осталось 2 строки. «Назад» — на прежний экран.
     sealed class GridScreen : IScreen
     {
         const int TitleY = 40, BarY = 110, BarH = 52, QueryH = 64, PillFont = 20, CharW = 11;
-        enum Area { Bar, Grid }   // Bar — вкладки или строка запроса
+        const int SideW = 360, SideGap = 48, ItemH = 50, ItemGap = 4, GridLeft = Theme.Margin + SideW + SideGap;
+        const double SideDelay = 0.5;   // с: жанр под фокусом открывается, когда список перестали листать
+        enum Area { Bar, Grid, Side }   // Bar — вкладки или строка запроса, Side — список жанров
 
         readonly App app;
         readonly GridSource src;
         readonly Widgets ui;
         readonly Grid grid;
-        readonly Label status;
+        readonly Label status, more, head;
+        readonly List<EvasObject> side = new List<EvasObject>();
+        readonly UiTimer sideTimer = new UiTimer();
+        int sideFocus;
         readonly HashSet<int> ids = new HashSet<int>();
         readonly List<EvasObject> bar = new List<EvasObject>();
         EvasObject barFrame;
@@ -68,10 +96,15 @@ namespace AnimeGo.Tv
             this.src = src;
             ui = new Widgets(app.Win);
             ui.Rect(0, 0, Theme.W, Theme.H, Theme.Bg);
-            ui.Text(Theme.Margin, TitleY, Theme.W - 2 * Theme.Margin, 48, Theme.T(src.Title, 30, bold: true));
+            var left = src.Browse ? GridLeft : Theme.Margin;
+            if (src.Browse) ui.Text(Theme.Margin, TitleY, SideW, 48, Theme.T(RuText.Catalog, 30, bold: true));
+            head = ui.Text(left, TitleY, Theme.W - Theme.Margin - left, 48, Theme.T(src.Title, 30, bold: true));
             var top = src.IsSearch || src.MyList ? BarY + QueryH + 32 : BarY;
-            grid = new Grid(ui, app.Images, top);
-            status = ui.Text(Theme.Margin, top + 40, Theme.W - 2 * Theme.Margin, 48, "", false);
+            grid = src.Browse ? new Grid(ui, app.Images, top, GridLeft, Theme.W - Theme.Margin - GridLeft, 5) : new Grid(ui, app.Images, top);
+            status = ui.Text(left, top + 40, Theme.W - Theme.Margin - left, 48, "", false);
+            more = ui.Text(left, 0, 600, 40, Theme.T(RuText.Loading, 24, Theme.MutedHex), false);
+            sideFocus = src.Genre;
+            if (src.Browse) BuildSide();
             if (src.MyList) BuildTabs();
             if (src.IsSearch) BuildQuery();
         }
@@ -88,6 +121,7 @@ namespace AnimeGo.Tv
         {
             alive = false;
             generation++;
+            sideTimer.Stop();
             keyboard?.Close();
             keyboard = null;
             overlay?.Hide();
@@ -101,10 +135,11 @@ namespace AnimeGo.Tv
             if (overlay != null) return overlay.OnKey(key);
             if (key == Keys.Back) { app.Back(); return true; }
             if (area == Area.Bar) return BarKey(key);
+            if (area == Area.Side) return SideKey(key);
             restoreTo = -1;   // пользователь сам двигает фокус — не перебивать
             switch (key)
             {
-                case Keys.Left: grid.Move(-1, 0); return true;
+                case Keys.Left: if (!grid.Move(-1, 0) && src.Browse) { sideFocus = src.Genre; SetArea(Area.Side); } return true;
                 case Keys.Right: grid.Move(1, 0); return true;
                 case Keys.Down: grid.Move(0, 1); MaybeLoadMore(); return true;
                 case Keys.Up: if (!grid.Move(0, -1) && (src.MyList || src.IsSearch)) SetArea(Area.Bar); return true;
@@ -137,10 +172,47 @@ namespace AnimeGo.Tv
             return false;
         }
 
+        // Список жанров: ↑↓ — по списку (жанр открывается через SideDelay), → и OK — в сетку (сразу открыв жанр под фокусом).
+        bool SideKey(string key)
+        {
+            switch (key)
+            {
+                case Keys.Up: case Keys.Down:
+                    var i = Math.Max(0, Math.Min(sideFocus + (key == Keys.Up ? -1 : 1), Genres.All.Length - 1));
+                    if (i == sideFocus) return true;
+                    sideFocus = i;
+                    BuildSide();
+                    sideTimer.Start(SideDelay, () => SelectGenre(sideFocus, false));
+                    return true;
+                case Keys.Right: case Keys.Ok:
+                    sideTimer.Stop();
+                    if (sideFocus != src.Genre) SelectGenre(sideFocus, true);
+                    else if (grid.Count > 0) SetArea(Area.Grid);
+                    else if (key == Keys.Ok) Load(false);   // после ошибки — повторить
+                    return true;
+                case Keys.Left: return true;
+            }
+            return false;
+        }
+
+        void SelectGenre(int i, bool toGrid)
+        {
+            if (!alive || i == src.Genre) return;
+            src.Genre = i;
+            src.Title = Genres.All[i].Title;
+            src.FirstPageUrl = Genres.All[i].Url;
+            src.Focus = 0;
+            head.Text = Theme.T(src.Title, 30, bold: true);
+            BuildSide();
+            Load(false, toGrid);
+        }
+
         // ---- данные ----
 
         // Первая страница. full — на весь экран «Загрузка…» (вход на экран), иначе строка статуса (смена вкладки).
-        void Load(bool full)
+        void Load(bool full) => Load(full, full && !src.StartInSide);
+
+        void Load(bool full, bool toGrid)
         {
             var n = ++generation;
             var url = src.FirstPageUrl;
@@ -176,7 +248,7 @@ namespace AnimeGo.Tv
                     nextFrame = src.MyList ? next : null;
                     DevLog.Write("grid: " + src.Title + (src.MyList ? " " + MyListTabs.All[src.Tab].Name : "") + " " + cards.Count + " cards" +
                         (paging?.HasMore == true || nextFrame != null ? ", есть ещё" : ""));
-                    Fill(cards, src.MyList ? RuText.EmptyList : RuText.NothingFound, full);
+                    Fill(cards, src.MyList ? RuText.EmptyList : RuText.NothingFound, toGrid);
                 });
             });
         }
@@ -208,14 +280,15 @@ namespace AnimeGo.Tv
             });
         }
 
-        // Фокус дошёл до последней строки — догрузить следующую страницу (в фоне, по одной за раз).
-        // force — без проверки строки: догрузка ради восстановления фокуса.
+        // До конца осталось ≤ 2 строк — догрузить следующую страницу (в фоне, по одной за раз), чтобы ниже всегда
+        // было что показать. force — без проверки строки: догрузка ради восстановления фокуса.
         void MaybeLoadMore(bool force = false)
         {
-            if (loadingMore || (!force && grid.FocusRow < grid.RowCount - 1) || !HasMore) return;
+            if (loadingMore || (!force && grid.FocusRow < grid.RowCount - 2) || !HasMore) return;
             var p = paging;
             var frameUrl = nextFrame;
             loadingMore = true;
+            ShowMore(true);
             var n = generation;
             var page = p != null && p.HasMore ? p.Page + 1 : 0;
             Task.Run(async () =>
@@ -237,6 +310,7 @@ namespace AnimeGo.Tv
                 {
                     if (!alive || n != generation) return;
                     loadingMore = false;   // при ошибке — повторим на следующем нажатии
+                    ShowMore(false);
                     if (cards == null)
                     {
                         DevLog.Write("grid: page " + (page > 0 ? page.ToString() : "frame") + " ошибка " + why);
@@ -253,6 +327,7 @@ namespace AnimeGo.Tv
                     DevLog.Write("grid: page " + (page > 0 ? page.ToString() : "frame") + " +" + fresh.Count);
                     grid.Append(fresh.Select(Item).ToList());
                     if (restoreTo >= 0) ContinueRestore();
+                    else MaybeLoadMore();   // страница короткая — сразу следующую
                 });
             });
         }
@@ -283,6 +358,16 @@ namespace AnimeGo.Tv
             nextFrame = null;
             loadingMore = false;
             restoreTo = -1;
+            ShowMore(false);
+        }
+
+        // «Загрузка…» под последней строкой, если она на экране.
+        void ShowMore(bool on)
+        {
+            var y = grid.EndY + 16;
+            if (!on || grid.Count == 0 || y > Theme.H - 44) { more.Hide(); return; }
+            more.Move(grid.Left, y);
+            more.Show();
         }
 
         // toGrid — фокус в сетку (вход на экран, результаты поиска); при смене вкладки он остаётся на вкладках.
@@ -297,12 +382,13 @@ namespace AnimeGo.Tv
             src.Focus = 0;   // восстановили (или восстанавливаем) — дальше не нужен
             if (restoreTo >= 0) MaybeLoadMore(true);
             else MaybeLoadMore();   // одна строка — она же последняя
-            var hasBar = src.MyList || src.IsSearch;
-            SetArea(!hasBar || (toGrid && fresh.Count > 0) ? Area.Grid : Area.Bar);
+            var hasBar = src.MyList || src.IsSearch || src.Browse;
+            SetArea(!hasBar || (toGrid && fresh.Count > 0) ? Area.Grid : src.Browse ? Area.Side : Area.Bar);
+            src.StartInSide = false;
             Toast.Raise();
         }
 
-        static RowItem Item(AnimeCard c) => new RowItem { Title = c.Title, ImageUrl = c.PosterUrl, Tag = c };
+        static RowItem Item(AnimeCard c) => new RowItem { Title = c.Title, ImageUrl = c.PosterUrl, Badge = c.Rating, Tag = c };
 
         static string Why(Exception e) => e is ApiException a ? a.Kind + " " + a.Message : e.GetType().Name + " " + e.Message;
 
@@ -314,7 +400,8 @@ namespace AnimeGo.Tv
             DevLog.Write("open: title " + c.Id + " " + c.Url);
             var back = new GridSource
             {
-                Title = src.Title, FirstPageUrl = src.FirstPageUrl, MyList = src.MyList, Query = src.Query, Tab = src.Tab,
+                Title = src.Title, FirstPageUrl = src.FirstPageUrl, MyList = src.MyList, Browse = src.Browse, Genre = src.Genre,
+                Query = src.Query, Tab = src.Tab,
                 Focus = grid.Focus,
             };
             app.Open(new TitleScreen(app, c.Id, c.Url), () => new GridScreen(app, back));
@@ -356,6 +443,22 @@ namespace AnimeGo.Tv
             ui.ShowFocus(barFrame, area == Area.Bar);
         }
 
+        // Список жанров: текущий — на подложке, под фокусом — белая «таблетка».
+        void BuildSide()
+        {
+            foreach (var o in side) ui.Remove(o);
+            side.Clear();
+            for (var i = 0; i < Genres.All.Length; i++)
+            {
+                var y = BarY + i * (ItemH + ItemGap);
+                var focused = area == Area.Side && i == sideFocus;
+                var current = i == src.Genre;
+                if (focused || current) side.Add(ui.RoundRect(Theme.Margin, y, SideW, ItemH, ItemH / 2, focused ? Theme.Text : Theme.Card));
+                var color = focused ? Theme.BgHex : current ? Theme.TextHex : Theme.MutedHex;
+                side.Add(ui.Text(Theme.Margin + 26, y + 7, SideW - 40, 36, Theme.T(Genres.All[i].Title, 25, color, focused || current)));
+            }
+        }
+
         void BuildQuery()
         {
             const int w = 1000;
@@ -373,6 +476,7 @@ namespace AnimeGo.Tv
         {
             area = a;
             grid.SetActive(a == Area.Grid);
+            if (src.Browse) BuildSide();
             if (barFrame != null) ui.ShowFocus(barFrame, a == Area.Bar);
         }
 
