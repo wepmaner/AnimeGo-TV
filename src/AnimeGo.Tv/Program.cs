@@ -30,7 +30,20 @@ namespace AnimeGo.Tv
         public SiteApi Api;
         public Prefs Prefs;
         public CookieJar Jar;
-        public User User;   // null — гость
+        // null — гость. Смена (и первое значение после запуска) уходит в Stash как /hello.
+        public User User
+        {
+            get => user;
+            set
+            {
+                var changed = !userKnown || user?.Id != value?.Id;
+                user = value;
+                userKnown = true;
+                if (changed) DevLog.Hello(value);
+            }
+        }
+        User user;
+        bool userKnown;
         public string PendingToast;   // сообщение для следующего экрана главной (показывает он)
         public ImageCache Images;
         public string UserKey => User?.Id.ToString() ?? "guest";
@@ -58,6 +71,7 @@ namespace AnimeGo.Tv
             Images = new ImageCache(DirectoryInfo.Cache);
             DevLog.Write("sync ctx: " + (System.Threading.SynchronizationContext.Current?.GetType().Name ?? "none"));
             DevLog.Write("start, cookies " + (string.IsNullOrEmpty(Prefs.Cookies) ? "нет" : "есть"));
+            DevLog.Start();
             StartSession();
         }
 
@@ -66,6 +80,7 @@ namespace AnimeGo.Tv
         {
             if (string.IsNullOrEmpty(Prefs.Cookies))
             {
+                User = null;   // гость: Stash узнаёт об этом из /hello
                 if (Prefs.SkippedLogin) ShowHome(); else Navigate(new LoginScreen(this));
                 return;
             }

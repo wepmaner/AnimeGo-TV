@@ -6,13 +6,11 @@ using AnimeGo.Core;
 
 namespace AnimeGo.Tv
 {
-    // Источники видео серии (спека §7): у выбранной озвучки — cvh, затем aniboom; kodik не играем.
+    // Источники видео серии (спека §7): у выбранной озвучки — cvh, затем aniboom, затем kodik.
     static class PlayerSources
     {
-        public static bool Playable(VideoSource s) => s.Provider == "cvh" || s.Provider == "aniboom";
-
         public static List<VideoSource> For(string key, IReadOnlyList<VideoSource> all) =>
-            all.Where(s => s.TranslationKey == key && Playable(s)).OrderBy(s => s.Provider == "cvh" ? 0 : 1).ToList();
+            all.Where(s => s.TranslationKey == key && s.Playable).OrderBy(s => VideoSource.Rank(s.Provider)).ToList();
 
         // Название озвучки: из списка озвучек плеера, иначе из источника, иначе сам ключ.
         public static string Title(string key, PlayerInfo info, EpisodeVideos v) =>
@@ -22,6 +20,7 @@ namespace AnimeGo.Tv
         // Ссылки CVH подписаны по IP и времени: запрашивать прямо перед воспроизведением, не кешировать.
         public static async Task<StreamSet> FetchAsync(SiteApi api, VideoSource src)
         {
+            if (src.Provider == "kodik") return await api.KodikStreamsAsync(src).ConfigureAwait(false);
             if (src.Provider != "cvh") return await api.AniboomStreamsAsync(src).ConfigureAwait(false);
             var ifr = Cvh.ParseIframeUrl(src.PlayerUrl) ?? throw new ApiException(ApiErrorKind.Parse, "адрес CVH");
             return await api.CvhStreamsAsync(src, ifr.season, ifr.episode).ConfigureAwait(false);

@@ -45,6 +45,7 @@ namespace AnimeGo.Tv
         public int Row { get; private set; }
         public int RowCount => rows.Count;
         public Action<SeasonRow> NeedInfo;   // ряд стал виден, а серий ещё нет
+        public Func<SeasonRow, int, (string When, string In)?> Upcoming;   // серия ещё не вышла — когда выйдет
 
         int Top => State == Mode.Full ? FullTop : CompactTop;
         int BarY => Top + BarDy;
@@ -316,10 +317,22 @@ namespace AnimeGo.Tv
                 var x = M + (i - r.First) * (TileW + TileGap);
                 var e = eps[i];
                 var playing = current && e.Number == curNumber;
+                var upcoming = playing ? null : Upcoming?.Invoke(r, e.Number);
                 // Текущая — красная рамка 3 px и красноватая подложка: не путать с белой рамкой фокуса.
                 if (playing) rowParts.Add(ui.RoundRect(x - 3, ty - 3, TileW + 6, TileH + 6, 13, Theme.Accent));
-                rowParts.Add(ui.RoundRect(x, ty, TileW, TileH, 10, playing ? PlayingBg : e.Watched ? WatchedBg : Theme.Card2));
+                rowParts.Add(ui.RoundRect(x, ty, TileW, TileH, 10, playing ? PlayingBg : e.Watched || upcoming != null ? WatchedBg : Theme.Card2));
                 var n = e.Number.ToString();
+                if (upcoming != null)
+                {
+                    // Не вышла: номер и дата выхода (без «выйдет» — плитка узкая).
+                    rowParts.Add(ui.Text(x, ty + 20, TileW, 34, Theme.T(n, 22, DimHex, true, "center")));
+                    var when = ui.Text(x + 8, ty + 60, TileW - 16, 30,
+                        Theme.T(string.IsNullOrEmpty(upcoming.Value.When) ? RuText.NotReleased : upcoming.Value.When, 17, DimHex, align: "center"));
+                    when.IsEllipsis = true;
+                    rowParts.Add(when);
+                    if (active && i == r.Focus) ui.MoveFocus(frame, x, ty, TileW, TileH);
+                    continue;
+                }
                 var label = playing ? Theme.T(n + " · " + RuText.NowWatching, 20, "#ffffff", true, "center")
                     : e.Watched ? "<align=center><font_size=22 color=" + DimHex + " font_weight=Bold>" + n + "  <color=" + GreenHex + ">✓</color></font_size></align>"
                     : Theme.T(n, 22, TileHex, true, "center");

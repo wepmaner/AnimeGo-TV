@@ -61,6 +61,7 @@ namespace AnimeGo.Tv
             blackout = ui.Rect(0, 0, Theme.W, Theme.H, Color.Black);
             panel = new EpisodePanel(ui);
             seasons = new SeasonRows(app, animeId, animeUrl, panel) { Loaded = UpdateTitle };
+            panel.Upcoming = (row, n) => row.Season.AnimeId == animeId ? Release.Of(seasons.Anime, n) : null;
             loading = ui.Text(Theme.Margin, Theme.H - Theme.Margin - 40, 600, 40, Theme.T(RuText.Loading, 26, Theme.MutedHex), false);
             end = new EndOverlay(ui) { Watch = WatchNext, Cancel = () => endCancelled = true };
         }
@@ -393,6 +394,8 @@ namespace AnimeGo.Tv
             var f = panel.Focused();
             if (f == null) return;
             var (row, ep) = f.Value;
+            var up = panel.Upcoming(row, ep.Number);
+            if (up != null) { ShowUpcoming(ep.Number, up.Value); return; }
             if (row.Season.AnimeId != animeId)
             {
                 DevLog.Write("open: anime " + row.Season.AnimeId + " ep " + ep.Number + " (другой сезон)");
@@ -522,10 +525,18 @@ namespace AnimeGo.Tv
 
         int NextNumber() => info?.Episodes.Where(e => e.Number > number).Select(e => e.Number).DefaultIfEmpty(0).Min() ?? 0;
 
+        // Следующая по списку ещё не вышла — когда выйдет; null — вышла или её нет.
+        (string When, string In)? NextUpcoming(int next) => next == 0 ? null : Release.Of(seasons.Anime, next);
+
+        void ShowUpcoming(int n, (string When, string In) up) =>
+            Toast.Show(ui, string.IsNullOrEmpty(up.When) ? RuText.NotReleased : RuText.EpisodeAirs(n, up.When));
+
         void PlayNext()
         {
             var next = NextNumber();
             if (next == 0) { Toast.Show(ui, RuText.NoNextEpisode); return; }
+            var up = NextUpcoming(next);
+            if (up != null) { ShowUpcoming(next, up.Value); return; }
             HidePanel();
             var _ = PlayEpisodeAsync(next, 0);
         }
@@ -536,6 +547,13 @@ namespace AnimeGo.Tv
             if (choice != null) return;
             endShown = true;
             nextNumber = NextNumber();
+            var up = NextUpcoming(nextNumber);
+            if (up != null)
+            {
+                // Следующая ещё не вышла: не отсчитываем, а говорим когда; по окончании — на страницу тайтла.
+                if (!completed) ShowUpcoming(nextNumber, up.Value); else ToTitle();
+                return;
+            }
             if (nextNumber == 0) { if (completed) ToTitle(); return; }
             idle.Stop();
             panel.Hide();

@@ -28,6 +28,10 @@ namespace AnimeGo.Tv
         readonly Keyboard[] native = new Keyboard[Fields];   // поля Entry (системная клавиатура)
         readonly Button sink;   // невидимая «заглушка» фокуса: пока ввода нет, фокус EFL лежит на ней, а не на полях
         OnScreenKeyboard kbd;   // открытая своя клавиатура или null
+        readonly StashLoginServer stash;     // вход с ПК через Stash: порт открыт, пока виден этот экран
+        readonly LoginProgressPanel progress;   // поверх карточки, пока идёт вход
+        readonly UiTimer after = new UiTimer();   // пауза после «Готово» / ошибки на панели
+        TaskCompletionSource<(User, string)> remote;   // ответ для Stash, пока идёт вход с его данными
         int index;              // подсвеченный пункт 0..3
         int requested = -1;     // поле, которому по OK попросили фокус (ждём Focused)
         bool typing, busy, alive;   // typing — системная клавиатура открыта (ставится только в Focused)
@@ -57,6 +61,15 @@ namespace AnimeGo.Tv
                 ui.Rect(lx, y + 14, 14, 14, Theme.Accent, false);
                 ui.Text(lx + 40, y, lw - 40, 44, Theme.T(benefits[i], 24, "#c9cdd4"), false);
             }
+
+            // Вход с компьютера через Stash: пока этот экран открыт, данные придут сами (StashLoginServer).
+            const int sy = 790, icon = 72;
+            ui.RoundRect(lx, sy, lw, 150, 20, Theme.Card, false);
+            var stashIcon = ui.Picture(lx + 28, sy + 39, icon, icon, false);
+            stashIcon.Load(System.IO.Path.Combine(Tizen.Applications.Application.Current.DirectoryInfo.Resource, "stash.png"));
+            ui.Text(lx + 28 + icon + 24, sy + 26, lw - icon - 80, 40, Theme.T(RuText.StashLoginTitle, 26, bold: true), false);
+            ui.Text(lx + 28 + icon + 24, sy + 68, lw - icon - 80, 64, Theme.T(RuText.StashLoginHint, 20, "#a3a9b4"), false)
+                .LineWrapType = WrapType.Word;
 
             // Карточка
             ui.Rect(CardX, CardY, CardW, CardH, CardColor, false);
@@ -108,14 +121,19 @@ namespace AnimeGo.Tv
             ui.Text(cx, by[3] + 22, cw, 50, Theme.T(RuText.LoginWithout, 24, Theme.TextHex, align: "center"), false);
             ui.Text(cx, by[3] + BtnH + 28, cw, 56,
                 Theme.T("Без входа работают каталог, поиск и просмотр. Войти можно позже: кнопка «Войти» вверху главной.", 18, "#a3a9b4"), false).LineWrapType = WrapType.Word;
+
+            progress = new LoginProgressPanel(ui, CardX, CardY, CardW, CardH, CardColor);   // последним — поверх карточки
+            stash = new StashLoginServer(FromStash, _ => App.Ui(() => after.Start(1.2, () => { if (alive) app.ShowHome(); })));
         }
 
         public void Show()
         {
             alive = true;
             ui.ShowAll();
+            progress.Hide();   // ShowAll показал и её
             Refresh();
             sink?.SetFocus(true);
+            stash.Start();
         }
 
         public void Hide()
@@ -124,6 +142,10 @@ namespace AnimeGo.Tv
             kbd?.Close();
             kbd = null;
             foreach (var f in native) f?.Blur();
+            stash.Stop();
+            after.Stop();
+            progress.Hide();
+            remote?.TrySetResult((null, RuText.StashLoginClosed));
             ui.Dispose();
         }
 
@@ -254,14 +276,36 @@ namespace AnimeGo.Tv
 
         void ShowError(string text) => error.Text = Theme.T(text, 22, Theme.AccentHex);
 
+        // Данные для входа из Stash (поток сервера): входим так же, как с пульта, но поля не показываем — панель.
+        Task<(User, string)> FromStash(string login, string password)
+        {
+            var tcs = new TaskCompletionSource<(User, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
+            App.Ui(() =>
+            {
+                if (!alive) { tcs.TrySetResult((null, RuText.StashLoginClosed)); return; }
+                if (busy || remote != null) { tcs.TrySetResult((null, RuText.StashLoginBusy)); return; }
+                kbd?.Close();
+                kbd = null;
+                remote = tcs;
+                Submit(login, password);
+            });
+            return tcs.Task;
+        }
+
         void Submit()
         {
             var login = (UseNativeKeyboard ? native[0].Text : values[0]).Trim();
             var password = UseNativeKeyboard ? native[1].Text : values[1];
             if (login.Length == 0 || password.Length == 0) { ShowError(RuText.BadLogin); return; }
+            Submit(login, password);
+        }
+
+        void Submit(string login, string password)
+        {
             busy = true;
             error.Text = "";
             Refresh();
+            progress.Show(remote != null);
             Task.Run(async () =>
             {
                 User user = null;
@@ -285,21 +329,35 @@ namespace AnimeGo.Tv
             });
         }
 
+        // Удачно — «Готово» на панели и через 1,2 с главная (для Stash — после того как ответ ему ушёл).
+        // Нет — ошибка на панели 2,5 с, затем снова форма с той же ошибкой.
         void Finished(User user, ApiException fail)
         {
-            if (!alive) return;
-            busy = false;
+            var r = remote;
+            remote = null;
+            if (!alive) { r?.TrySetResult((null, RuText.StashLoginClosed)); return; }
             if (user != null)
             {
                 app.User = user;
                 app.Prefs.Cookies = app.Jar.Export();
                 app.Prefs.SkippedLogin = false;
                 app.SavePrefs();
-                app.ShowHome();
-                return;
+                progress.Success(user.Name);
+                if (r != null) r.TrySetResult((user, null));   // главную откроет сервер, когда ответит Stash
+                else after.Start(1.2, () => { if (alive) app.ShowHome(); });
+                return;   // busy остаётся: до перехода клавиши не нужны
             }
-            ShowError(fail != null && fail.Kind == ApiErrorKind.Unauthorized ? RuText.BadLogin : RuText.NoConnection);
-            Refresh();
+            var text = fail != null && fail.Kind == ApiErrorKind.Unauthorized ? RuText.BadLogin : RuText.NoConnection;
+            progress.Fail(text);
+            r?.TrySetResult((null, text));
+            after.Start(2.5, () =>
+            {
+                if (!alive) return;
+                busy = false;
+                progress.Hide();
+                ShowError(text);
+                Refresh();
+            });
         }
 
         void Skip()

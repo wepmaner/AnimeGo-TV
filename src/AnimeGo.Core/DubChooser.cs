@@ -9,15 +9,26 @@ namespace AnimeGo.Core
         public IReadOnlyList<string> Available = new string[0];
     }
 
-    // Основная и запасная озвучка (спека §5.6, §9). Играем только cvh и aniboom: kodik не воспроизводим.
+    // Основная и запасная озвучка (спека §5.6, §9). Доступны озвучки с cvh, aniboom или kodik; без настроек берём
+    // первую с cvh/aniboom (у Kodik старт дольше), озвучки только с Kodik — в конце списка.
     public static class DubChooser
     {
         public static DubDecision Choose(DubPref pref, IReadOnlyList<VideoSource> sources)
         {
-            var available = new List<string>();
+            var fast = new List<string>();
+            var kodikOnly = new List<string>();
             foreach (var s in sources)
-                if ((s.Provider == "cvh" || s.Provider == "aniboom") && s.TranslationKey != null && !available.Contains(s.TranslationKey))
-                    available.Add(s.TranslationKey);
+            {
+                if (!s.Playable || s.TranslationKey == null) continue;
+                if (VideoSource.Rank(s.Provider) < 2)
+                {
+                    kodikOnly.Remove(s.TranslationKey);
+                    if (!fast.Contains(s.TranslationKey)) fast.Add(s.TranslationKey);
+                }
+                else if (!fast.Contains(s.TranslationKey) && !kodikOnly.Contains(s.TranslationKey)) kodikOnly.Add(s.TranslationKey);
+            }
+            var available = new List<string>(fast);
+            available.AddRange(kodikOnly);
 
             var d = new DubDecision { Available = available };
             if (pref.Main != null && available.Contains(pref.Main)) d.TranslationKey = pref.Main;

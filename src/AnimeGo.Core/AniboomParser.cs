@@ -33,6 +33,24 @@ namespace AnimeGo.Core
             };
         }
 
+        // Кадр серии из data-parameters (poster): mqdefault.webp → hqdefault (крупнее, отдаётся JPEG). null — нет.
+        public static string ParsePoster(string embedHtml)
+        {
+            var tag = Html.TagsWithAttr(embedHtml ?? "", null, "data-parameters").FirstOrDefault();
+            var raw = tag == null ? null : Html.Attr(tag, "data-parameters");
+            if (string.IsNullOrEmpty(raw)) return null;
+            try
+            {
+                var poster = Json.Parse<AniboomParamsDto>(raw)?.Poster;
+                return string.IsNullOrEmpty(poster) ? null : poster.Replace("/mqdefault.", "/hqdefault.");
+            }
+            catch (Exception) { return null; }   // тип ошибки разбора зависит от рантайма
+        }
+
+        // Адрес встраивания той же озвучки для серии n: меняем episode= в адресе.
+        public static string EpisodeUrl(string playerUrl, int n) =>
+            System.Text.RegularExpressions.Regex.Replace(playerUrl ?? "", @"([?&])episode=\d+", "${1}episode=" + n);
+
         public static string EmbedUrl(string playerUrl) =>
             playerUrl != null && playerUrl.StartsWith("//", StringComparison.Ordinal) ? "https:" + playerUrl : playerUrl;
     }

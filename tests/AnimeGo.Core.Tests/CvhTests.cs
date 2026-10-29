@@ -88,5 +88,24 @@ namespace AnimeGo.Core.Tests
             Assert.Equal("360p", s.Pick("240p").Quality);
             Assert.Equal("1080p", s.Pick("4k").Quality);
         }
+
+        [Fact]
+        public void EpisodeVideos_PreferVoice()
+        {
+            var p = Cvh.ParsePlaylist(Fixture.Read("cvh_playlist_62542.json"));
+            var band = Cvh.EpisodeVideos(p, 3, "Студийная Банда");
+            Assert.Equal("15266286492336", band[1]);
+            var any = Cvh.EpisodeVideos(p, 3, "Нет такой");
+            Assert.Equal(band.Keys.OrderBy(k => k), any.Keys.OrderBy(k => k));   // серии те же, озвучка любая
+            Assert.Empty(Cvh.EpisodeVideos(p, 99, null));
+        }
+
+        [Fact]
+        public void Thumb()
+        {
+            Assert.StartsWith("https://iv.okcdn.ru/videoPreview", Cvh.ParseThumb(Fixture.Read("cvh_video_redacted.json")));
+            Assert.Null(Cvh.ParseThumb("{}"));
+            Assert.Null(Cvh.ParseThumb("<html>"));
+        }
     }
 }

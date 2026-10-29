@@ -125,7 +125,8 @@ namespace AnimeGo.Core
             }
             else req.Headers.TryAddWithoutValidation("Accept", "text/html,*/*;q=0.8");
             var host = req.RequestUri.Host;
-            if (host == "plapi.cdnvideohub.com" || host == "aniboom.one") req.Headers.TryAddWithoutValidation("Referer", Base + "/");
+            if (host == "plapi.cdnvideohub.com" || host == "aniboom.one" || host.StartsWith("kodik", StringComparison.Ordinal))
+                req.Headers.TryAddWithoutValidation("Referer", Base + "/");   // плееры отдают видео только «со страницы animego»
 
             var client = http; // Logout может подменить поле посреди запроса
             try

@@ -58,6 +58,32 @@ namespace AnimeGo.Core
                 i.Season == season && i.Episode == episode && Norm(i.VoiceStudio) == want);
         }
 
+        // Серия → vkId видео сезона season; озвучка voice, если у серии она есть, иначе первая в плейлисте.
+        // Нужно для кадров серий: у каждого видео CVH свой thumbUrl.
+        public static Dictionary<int, string> EpisodeVideos(CvhPlaylistDto p, int season, string voice)
+        {
+            var want = Norm(voice);
+            var map = new Dictionary<int, string>();
+            foreach (var i in p.Items)
+            {
+                if (i.Season != season || i.Episode == null || string.IsNullOrEmpty(i.VkId)) continue;
+                var ep = i.Episode.Value;
+                if (!map.ContainsKey(ep) || (voice != null && Norm(i.VoiceStudio) == want)) map[ep] = i.VkId;
+            }
+            return map;
+        }
+
+        // Кадр-превью серии (JPEG 720×405 с iv.okcdn.ru) из ответа /video/{vkId}; null — нет или не JSON.
+        public static string ParseThumb(string json)
+        {
+            try
+            {
+                var url = Json.Parse<CvhVideoDto>(json ?? "")?.ThumbUrl;
+                return string.IsNullOrEmpty(url) ? null : url;
+            }
+            catch (Exception) { return null; }   // тип ошибки разбора зависит от рантайма
+        }
+
         public static StreamSet ParseVideo(string json)
         {
             var v = ParseJson<CvhVideoDto>(json, "видео CVH");

@@ -30,5 +30,19 @@ namespace AnimeGo.Core.Tests
             Assert.Equal("https://aniboom.one/embed/x?a=1", AniboomParser.EmbedUrl("//aniboom.one/embed/x?a=1"));
             Assert.Equal("https://aniboom.one/embed/x", AniboomParser.EmbedUrl("https://aniboom.one/embed/x"));
         }
+
+        [Fact]
+        public void Poster_Hq()
+        {
+            Assert.Equal("https://i1.boom-img.com/mk/mkPdyoERMOQ/hqdefault.webp", AniboomParser.ParsePoster(Fixture.Read("aniboom_embed.html")));
+            Assert.Null(AniboomParser.ParsePoster("<div></div>"));
+        }
+
+        [Fact]
+        public void EpisodeUrl()
+        {
+            Assert.Equal("//aniboom.one/embed/Grad?episode=7&translation=2", AniboomParser.EpisodeUrl("//aniboom.one/embed/Grad?episode=1&translation=2", 7));
+            Assert.Equal("//aniboom.one/embed/Grad?translation=2&episode=12", AniboomParser.EpisodeUrl("//aniboom.one/embed/Grad?translation=2&episode=3", 12));
+        }
     }
 }

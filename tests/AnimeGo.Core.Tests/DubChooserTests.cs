@@ -10,7 +10,7 @@ namespace AnimeGo.Core.Tests
 
         private static readonly VideoSource[] Sources =
         {
-            S("kodik", "k"), S("cvh", "59"), S("aniboom", "59"), S("aniboom", "12"), S("kodik", "7"), S("cvh", "3"),
+            S("kodik", "k"), S("cvh", "59"), S("aniboom", "59"), S("aniboom", "12"), S("kodik", "7"), S("cvh", "3"), S("other", "x"),
         };
 
         [Fact]
@@ -22,11 +22,11 @@ namespace AnimeGo.Core.Tests
         }
 
         [Fact]
-        public void Main_OnlyKodik_UsesFallback()
+        public void Main_OnlyKodik_IsChosen()
         {
             var d = DubChooser.Choose(new DubPref { Main = "7", Fallback = "3" }, Sources);
-            Assert.Equal("3", d.TranslationKey);
-            Assert.True(d.UsedFallback);
+            Assert.Equal("7", d.TranslationKey);
+            Assert.False(d.UsedFallback);
         }
 
         [Fact]
@@ -45,19 +45,20 @@ namespace AnimeGo.Core.Tests
             Assert.False(d.UsedFallback);
         }
 
+        // Без настроек первой идёт озвучка с CVH/AniBoom: у них быстрее старт; Kodik-only — в конце, неизвестные — нет.
         [Fact]
-        public void PrefsSet_ButUnavailable_AsksUser_AndAvailableExcludesKodikOnly()
+        public void PrefsSet_ButUnavailable_AsksUser_KodikOnlyLast()
         {
-            var d = DubChooser.Choose(new DubPref { Main = "7", Fallback = "zzz" }, Sources);
+            var d = DubChooser.Choose(new DubPref { Main = "zzz", Fallback = "yyy" }, Sources);
             Assert.Null(d.TranslationKey);
             Assert.False(d.UsedFallback);
-            Assert.Equal(new[] { "59", "12", "3" }, new List<string>(d.Available));
+            Assert.Equal(new[] { "59", "12", "3", "k", "7" }, new List<string>(d.Available));
         }
 
         [Fact]
         public void OnlyMainSet_Unavailable_AsksUser()
         {
-            Assert.Null(DubChooser.Choose(new DubPref { Main = "7" }, Sources).TranslationKey);
+            Assert.Null(DubChooser.Choose(new DubPref { Main = "zzz" }, Sources).TranslationKey);
         }
 
         [Fact]

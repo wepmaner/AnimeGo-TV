@@ -35,13 +35,14 @@ namespace AnimeGo.Tv
             http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", SiteApi.UserAgent);
         }
 
-        public void Set(Image img, string url)
+        // cacheKey — имя в кеше вместо адреса: для ссылок с меняющимся токеном (кадры серий CVH).
+        public void Set(Image img, string url, string cacheKey = null)
         {
             if (img == null || string.IsNullOrEmpty(url)) return;
             if (url.StartsWith("//", StringComparison.Ordinal)) url = "https:" + url;
             else if (url.StartsWith("/", StringComparison.Ordinal)) url = SiteApi.Base + url;
             wanted[img] = url;
-            var name = Path.Combine(dir, Sha1(url));
+            var name = Path.Combine(dir, Sha1(cacheKey ?? url));
             var cached = Cached(name);
             if (cached != null) { Apply(img, url, cached); return; }
             Load(url, name).ContinueWith(t =>
@@ -49,6 +50,17 @@ namespace AnimeGo.Tv
                 var file = t.Status == TaskStatus.RanToCompletion ? t.Result : null;
                 App.Ui(() => { if (file != null) Apply(img, url, file); else Forget(img, url); });
             });
+        }
+
+        // Картинка по cacheKey, если она уже в кеше; false — нет, надо узнать адрес и звать Set.
+        public bool TrySetCached(Image img, string cacheKey)
+        {
+            if (img == null) return false;
+            var cached = Cached(Path.Combine(dir, Sha1(cacheKey)));
+            if (cached == null) return false;
+            wanted[img] = cacheKey;
+            Apply(img, cacheKey, cached);
+            return true;
         }
 
         void Apply(Image img, string url, string file)

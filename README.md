@@ -16,7 +16,7 @@
 <p align="center">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Samsung%20Tizen%205.5%2B-1428A0">
   <img alt=".NET" src="https://img.shields.io/badge/.NET-Tizen.NET%20(ElmSharp)-512BD4">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-201%20passing-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-252%20passing-2ea44f">
 </p>
 
 > [!NOTE]
@@ -30,7 +30,7 @@
 - **Dubs** — remembered per title: a *main* dub and a *fallback* one used automatically when the main studio hasn't dubbed the new episode yet.
 - **Quality** — Auto (HLS) or a fixed resolution, remembered.
 - **Progress lives on the site** — position and “watched” marks are sent to animego.me, so your phone and PC see the same thing. The TV keeps only cookies, dub choices and a few dates.
-- **Login is optional** — catalog, search and playback work as a guest; sign in with a built-in on-screen QWERTY keyboard.
+- **Login is optional** — catalog, search and playback work as a guest; sign in with a built-in on-screen QWERTY keyboard or from the PC via Stash.
 
 ## Requirements
 
@@ -80,7 +80,7 @@ Docs: [design spec](docs/superpowers/specs/2026-10-27-animego-tv-design.md) · [
 
 ## Known limitations
 
-- Kodik streams are not playable; CVH and AniBoom are used.
+- Sources are tried in order CVH → AniBoom → Kodik; Kodik's player is reverse-engineered and may break when they change it.
 - The TV's native keyboard can't be used reliably from an app, so the app has its own.
 - The first poster load after launch takes a few seconds (WebP is decoded on the TV), then posters come from the cache.
 - Opening skip uses [aniskip](https://aniskip.com) timings when they exist; otherwise it learns from your first press on each title.

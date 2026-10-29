@@ -1,4 +1,5 @@
-// Отладка: принимает строки от приложения на ТВ (Debug-сборка) и печатает их.
+// Отладка: принимает журнал приложения на ТВ (тот же протокол, что у Stash) и печатает его.
+// POST /log — строки текста; POST /hello — JSON {app, version, model, tizen, user}.
 // /wire — печатает сырые заголовки пришедшего запроса (проверка, что ТВ шлёт их байт в байт).
 import http from 'node:http';
 http.createServer((req, res) => {
@@ -10,5 +11,5 @@ http.createServer((req, res) => {
   }
   let b = '';
   req.on('data', c => b += c);
-  req.on('end', () => { console.log(b); res.end('ok'); });
+  req.on('end', () => { console.log(req.url.startsWith('/hello') ? 'HELLO ' + b : b); res.end('ok'); });
 }).listen(8778, '0.0.0.0', () => console.log('devlog :8778'));

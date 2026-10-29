@@ -20,5 +20,17 @@ namespace AnimeGo.Core.Tests
         [Fact]
         public void NoDubChoose_AsksToChoose() =>
             Assert.Equal("JAM CLUB серию 13 пока не озвучила. Выберите озвучку", RuText.NoDubChoose("JAM CLUB", 13));
+
+        [Theory]
+        [InlineData("27K", "27 тыс. оценок")]
+        [InlineData("1.2K", "1,2 тыс. оценок")]
+        [InlineData("3M", "3 млн оценок")]
+        [InlineData("1", "1 оценка")]
+        [InlineData("23", "23 оценки")]
+        [InlineData("512", "512 оценок")]
+        [InlineData("11", "11 оценок")]
+        [InlineData("", null)]
+        [InlineData(null, null)]
+        public void Votes(string v, string expected) => Assert.Equal(expected, RuText.Votes(v));
     }
 }

@@ -58,6 +58,10 @@ namespace AnimeGo.Core
         public string TranslationKey;
         public int? TranslationId;
         public string TranslationTitle;
+
+        // Что умеем играть, и в каком порядке пробовать: CVH (быстрый старт), AniBoom, Kodik.
+        public static int Rank(string provider) => provider == "cvh" ? 0 : provider == "aniboom" ? 1 : provider == "kodik" ? 2 : -1;
+        public bool Playable => Rank(Provider) >= 0;
     }
 
     public sealed class PlayerInfo
@@ -141,6 +145,61 @@ namespace AnimeGo.Core
         public string Kind;            // из поля «Тип», null если нет
         public string Year;            // первый год из поля «Выпуск», null если нет
         public IReadOnlyList<RelatedTitle> Related = new RelatedTitle[0];
+        public string Rating;          // рейтинг сайта как на странице ("9,4"), null если оценок нет
+        public string Votes;           // число оценок как на странице ("27K"), null если нет
+        public IReadOnlyList<InfoField> Fields = new InfoField[0];       // поля «Тип», «Студия»… в порядке сайта
+        public IReadOnlyList<Character> Characters = new Character[0];  // «Главные герои»
+        public IReadOnlyList<string> Screenshots = new string[0];       // кадры 640×360
+        public IReadOnlyList<Review> Reviews = new Review[0];
+        public NextEpisode Next;                                        // «Следующий эпизод», null — нет (вышел или неизвестно)
+        public IReadOnlyList<ScheduledEpisode> Schedule = new ScheduledEpisode[0];   // график ещё не вышедших серий
+
+        // Значение поля по метке ("Студия"), null если нет.
+        public string Field(string label)
+        {
+            foreach (var f in Fields) if (f.Label == label) return f.Value;
+            return null;
+        }
+    }
+
+    // Дата премьеры следующей серии — как на сайте, во времени аккаунта (гостю — во времени сайта).
+    public sealed class NextEpisode
+    {
+        public int Number;
+        public string When;            // "30 окт. 2026 пт 16:30"
+        public string In;              // "через 19 часов", null если нет
+    }
+
+    // Строка графика выхода серий.
+    public sealed class ScheduledEpisode
+    {
+        public int Number;
+        public string Date;            // "30 октября 2026"
+        public string Status;          // "через 19 часов"; у вышедших — пусто или иное
+    }
+
+    public sealed class InfoField
+    {
+        public string Label;
+        public string Value;           // текст, перечисления через ", "
+    }
+
+    public sealed class Character
+    {
+        public string Name;
+        public string Actor;           // сэйю, null если нет
+    }
+
+    // Рецензия/отзыв со страницы тайтла.
+    public sealed class Review
+    {
+        public string Title;
+        public string Author;
+        public string Date;            // как на сайте: "25 января 2026"
+        public string Useful;          // "66 из 76 сочли этот отзыв полезным", null если нет
+        public string Score;           // итоговая оценка автора ("10"), null если нет
+        public string Text;            // абзацы через "\n\n"
+        public bool Spoilers;          // автор пометил «есть спойлеры»
     }
 
     public sealed class Season

@@ -298,5 +298,50 @@ namespace AnimeGo.Core.Tests
             var h = new FakeHandler(r => throw new HttpRequestException("down"));
             Assert.Null(await new SiteApi(new CookieJar(), h).AniskipAsync(62542, 1));
         }
+
+        const string KodikUrl = "https://kodikplayer.com/seria/1677747/4a22a63f48513e2398a836d7a494bc05/720p?translations=false&min_age=18";
+
+        static HttpResponseMessage Js(string body) =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/javascript") };
+
+        [Fact]
+        public async Task Kodik_PageThenFtor()
+        {
+            var h = new FakeHandler(r => r.Method == HttpMethod.Get ? Html(Fixture.Read("kodik_seria.html")) : FakeHandler.Json(Fixture.Read("kodik_ftor.json")));
+            var set = await new SiteApi(new CookieJar(), h).KodikStreamsAsync(new VideoSource { Provider = "kodik", PlayerUrl = KodikUrl });
+            Assert.Equal("720p", set.Streams[0].Quality);
+            Assert.Equal(KodikUrl, h.Requests[0].RequestUri.ToString());
+            Assert.Equal("https://animego.me/", Header(h.Requests[0], "Referer"));
+            Assert.Equal("https://kodikplayer.com/ftor", h.Requests[1].RequestUri.ToString());
+            var body = await h.Requests[1].Content.ReadAsStringAsync();
+            Assert.Contains("d=animego.me", body);
+            Assert.Contains("hash=4a22a63f48513e2398a836d7a494bc05", body);
+        }
+
+        // Эндпоинт переименовали: 404 → ищем новый в коде плеера и повторяем.
+        [Fact]
+        public async Task Kodik_EndpointMoved_FoundInPlayerJs()
+        {
+            var h = new FakeHandler(r =>
+            {
+                var path = r.RequestUri.AbsolutePath;
+                if (r.Method == HttpMethod.Get && path.EndsWith(".js")) return Js("x,{type:\"POST\",url:atob(\"L25ldw==\"),cache:!1}");   // /new
+                if (r.Method == HttpMethod.Get) return Html(Fixture.Read("kodik_seria.html"));
+                return path == "/new" ? FakeHandler.Json(Fixture.Read("kodik_ftor.json")) : FakeHandler.Status(HttpStatusCode.NotFound);
+            });
+            var api = new SiteApi(new CookieJar(), h);
+            try
+            {
+                var set = await api.KodikStreamsAsync(new VideoSource { Provider = "kodik", PlayerUrl = KodikUrl });
+                Assert.Equal(3, set.Streams.Count);
+                Assert.Equal("https://kodikplayer.com/new", h.Requests.Last().RequestUri.ToString());
+            }
+            finally
+            {
+                // Эндпоинт кешируется на приложение — вернуть, чтобы не влиять на другие тесты.
+                typeof(SiteApi).GetField("kodikEndpoint", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                    .SetValue(null, Kodik.DefaultEndpoint);
+            }
+        }
     }
 }

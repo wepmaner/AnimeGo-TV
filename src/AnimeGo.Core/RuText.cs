@@ -64,6 +64,56 @@ namespace AnimeGo.Core
             return n.ToString(CultureInfo.InvariantCulture) + " " + word;
         }
 
+        public const string StashGotLogin = "Данные для входа получены из Stash";
+        public const string ConnectingAnimego = "Соединяемся с animego.me";
+        public const string SigningIn = "Входим в аккаунт…";
+        public const string StashLoginBusy = "Вход уже идёт";
+        public const string StashLoginTitle = "Или войдите с компьютера";
+        public const string StashLoginHint = "В Stash на вкладке «Samsung TV». Пока открыт этот экран, логин и пароль придут сюда сами.";
+        public const string StashLoginClosed = "Экран входа уже закрыт";
+        public const string StashNoCredentials = "Нет логина или пароля";
+
+        public static string SignedInAs(string name) => string.IsNullOrEmpty(name) ? "Готово" : "Готово, вы вошли как " + name;
+
+        public const string Screens = "Кадры";
+        public const string NoEpisodes = "Серий пока нет";
+        public const string EpisodeWatched = "просмотрена";
+        public const string NotReleased = "ещё не вышла";
+        public const string WillAir = "выйдет";
+        public const string Schedule = "График выхода";
+        public const string Aired = "вышла";
+
+        public static string EpisodeAirs(int n, string when) => n.ToString(CultureInfo.InvariantCulture) + " серия выйдет " + when;
+
+        public static string WatchedOf(int watched, int total) =>
+            "просмотрено " + watched.ToString(CultureInfo.InvariantCulture) + " из " + total.ToString(CultureInfo.InvariantCulture);
+        public const string About = "О тайтле";
+        public const string MainCharacters = "Главные герои";
+        public const string Reviews = "Рецензии и отзывы";
+        public const string Spoilers = "спойлеры";
+        public const string DescriptionTitle = "Описание";
+
+        public static string WatchEpisode(int n) => "Смотреть · серия " + n.ToString(CultureInfo.InvariantCulture);
+
+        public static string ReviewsButton(int n) => "Отзывы · " + n.ToString(CultureInfo.InvariantCulture);
+
+        public static string Of(int i, int n) => i.ToString(CultureInfo.InvariantCulture) + " / " + n.ToString(CultureInfo.InvariantCulture);
+
+        // Число оценок как на сайте («27K», «1.2K», «512») → «27 тыс. оценок», «512 оценок»; null — null.
+        public static string Votes(string v)
+        {
+            v = (v ?? "").Trim();
+            if (v.Length == 0) return null;
+            var last = char.ToUpperInvariant(v[v.Length - 1]);
+            if (last == 'K') return v.Substring(0, v.Length - 1).Replace('.', ',') + " тыс. оценок";
+            if (last == 'M') return v.Substring(0, v.Length - 1).Replace('.', ',') + " млн оценок";
+            if (!int.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var n)) return v;
+            var d = n % 10;
+            var dd = n % 100;
+            var word = d == 1 && dd != 11 ? "оценка" : d >= 2 && d <= 4 && (dd < 12 || dd > 14) ? "оценки" : "оценок";
+            return v + " " + word;
+        }
+
         public static string Episode(int n) => "Серия " + n.ToString(CultureInfo.InvariantCulture);
 
         // 05:08, а от часа — 1:05:08.

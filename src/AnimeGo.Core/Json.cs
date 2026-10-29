@@ -88,6 +88,7 @@ namespace AnimeGo.Core
     internal class CvhVideoDto
     {
         [DataMember(Name = "duration")] public int? Duration { get; set; }
+        [DataMember(Name = "thumbUrl")] public string ThumbUrl { get; set; }
         [DataMember(Name = "sources")] public CvhSourcesDto Sources { get; set; }
     }
 
@@ -110,6 +111,7 @@ namespace AnimeGo.Core
         [DataMember(Name = "hls")] public string Hls { get; set; }
         [DataMember(Name = "dash")] public string Dash { get; set; }
         [DataMember(Name = "duration")] public int? Duration { get; set; }
+        [DataMember(Name = "poster")] public string Poster { get; set; }
     }
 
     [DataContract]

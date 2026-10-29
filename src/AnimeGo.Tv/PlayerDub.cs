@@ -187,7 +187,7 @@ namespace AnimeGo.Tv
         }
 
         // Строки панели: озвучки, у которых у серии есть хоть один источник (only — только эти ключи),
-        // группы по типу, справа провайдеры; только Kodik — серая «недоступно в приложении».
+        // группы по типу, справа провайдеры; без известного провайдера — серая «недоступно в приложении».
         List<ChoiceItem> DubItems(EpisodeVideos v, IReadOnlyList<string> only, string current)
         {
             var pref = app.Prefs.Dub(app.UserKey, animeId);
@@ -201,8 +201,8 @@ namespace AnimeGo.Tv
             return list.Select(x =>
             {
                 var provs = v.Sources.Where(s => s.TranslationKey == x.Key).Select(s => s.Provider).Distinct()
-                    .OrderBy(p => p == "cvh" ? 0 : p == "aniboom" ? 1 : 2).ToList();
-                var ok = provs.Any(p => p == "cvh" || p == "aniboom");
+                    .OrderBy(p => VideoSource.Rank(p) < 0 ? 9 : VideoSource.Rank(p)).ToList();
+                var ok = provs.Any(p => VideoSource.Rank(p) >= 0);
                 var marks = new List<string>();
                 if (x.Key == current) marks.Add(RuText.Now);
                 if (x.Key == pref.Main) marks.Add(RuText.Main);
