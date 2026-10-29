@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest package="ru.animego.tv" version="1.0.3" api-version="6" xmlns="http://tizen.org/ns/packages">
+<manifest package="ru.animego.tv" version="1.0.4" api-version="6" xmlns="http://tizen.org/ns/packages">
   <profile name="tv" />
   <ui-application appid="ru.animego.tv" exec="AnimeGo.Tv.dll" type="dotnet" multiple="false" taskmanage="true" launch_mode="single">
     <label>AnimeGoTV</label>

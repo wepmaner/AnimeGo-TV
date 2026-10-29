@@ -54,5 +54,6 @@ Samsung UE50TU7140 (2020, Tizen 5.5), `192.168.0.16`, режим разрабо�
 - **Системную клавиатуру ТВ (IME через `Entry`) приспособить не удалось** (UE50TU7140, раунды 6–9 задачи 14 — после исправления дедупа OK; в раундах до него OK глотался нашим же багом): «Готово» приходит тем же `Return`, что и выбор буквы; `Activated`/`Return` в `KeyDown` самого `Entry` срабатывают и на выбор буквы;
   смена языка/регистра — `Return` без изменения текста; «Назад» при открытом IME — `Cancel`. Отличить «Готово» не удалось, сигнала «IME скрыт» в ElmSharp API 6 не нашли.
   Ввод — своя QWERTY `OnScreenKeyboard`; `Keyboard.cs` (Entry) — запасной, включается `LoginScreen.UseNativeKeyboard = true`.
+- **Значок приложения — в `src/AnimeGo.Tv/shared/res/animego.png`**: `<icon>` манифеста ищется в `shared/res/` пакета, из `res/` ТВ его не берёт (до 1.0.4 значка на ТВ не было). Копия в `res/` — для экрана входа.
 - Значок рисуется из `design/logo/animego-icon.svg`, PNG 512×512 получен через `msedge --headless --screenshot` (других растеризаторов на ПК нет). Значок кешируется ТВ: после смены поднять `version`, `sdb uninstall ru.animego.tv` (стирает вход), `deploy.sh Release`.
 - `dotnet build` ругается NU1902/NU1903 на `SixLabors.ImageSharp` 2.1.9 (NuGet, не C#); предупреждений компилятора 0.
