@@ -4,7 +4,8 @@
 #   2. тесты Core, Release-сборка;
 #   3. проверки: подпись — тот же сертификат автора (иначе обновление поверх не встанет и вход пропадёт),
 #      в пакете нет приватных фикстур, версия в пакете = X.Y.Z;
-#   4. dist/ru.animego.tv-X.Y.Z.tpk, тег vX.Y.Z, push текущей ветки в main, gh release create с .tpk.
+#   4. dist/ru.animego.tv-X.Y.Z.tpk, тег vX.Y.Z, push текущей ветки в main, gh release create с .tpk;
+#   5. если задан STASH_CI_TOKEN — пинг Stash, чтобы он сразу перечитал каталог.
 # --dry-run — только шаги 2–3 и dist/, без коммита версии, тега, push и релиза.
 set -e -o pipefail
 export MSYS_NO_PATHCONV=1
@@ -13,6 +14,7 @@ VERSION=${1:?"Использование: scripts/release.sh X.Y.Z [--dry-run]"}
 DRY=0; [ "${2:-}" = "--dry-run" ] && DRY=1
 REPO=wepmaner/AnimeGo-TV
 PKG=ru.animego.tv
+STASH_APP=animego-tv   # id в каталоге Stash (пресет wepmaner/animego-tv)
 # SHA-256 сертификата автора (тестовый author_test.p12 из Tizen.NET.Sdk 1.2.1). Менять только осознанно:
 # пакет с другой подписью ТВ поверх старого не поставит.
 AUTHOR_SHA256="A2:25:87:C2:BE:C3:D9:2F:08:21:EB:28:2B:8B:89:D5:C9:5B:B7:B3:CE:34:FD:C1:C4:44:3B:D0:A1:0A:74:AF"
@@ -81,3 +83,12 @@ gh release create "$TAG" "dist/$PKG-$VERSION.tpk" -R "$REPO" --title "AnimeGoTV 
 
 Установка: Stash → «Samsung TV», или вручную: \`sdb connect <ip-тв>:26101\`, \`sdb install $PKG-$VERSION.tpk\`."
 echo "✓ https://github.com/$REPO/releases/tag/$TAG"
+
+# 5. Пинг Stash: перечитать каталог сейчас, а не через ≤30 мин по cron. Токен — CI-токен приложения из админки Stash,
+#    задаётся вами в окружении (STASH_CI_TOKEN=… scripts/release.sh X.Y.Z); в репозиторий и логи не попадает.
+if [ -n "${STASH_CI_TOKEN:-}" ]; then
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer ${STASH_CI_TOKEN}"     "https://stash.stash-worker.workers.dev/v1/admin/refresh?app=$STASH_APP")
+  [ "$code" = "200" ] && echo "✓ Stash перечитал каталог" || echo "⚠ Stash ответил $code — каталог обновится сам в течение 30 мин" >&2
+else
+  echo "• STASH_CI_TOKEN не задан — Stash увидит релиз сам в течение 30 мин"
+fi
