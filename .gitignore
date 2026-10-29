@@ -7,3 +7,6 @@ obj/
 # Образцы, полученные под аккаунтом (логин, история просмотра) — только локально
 research/samples/private/
 tests/AnimeGo.Core.Tests/Fixtures/private/
+
+# Пакеты релизов (scripts/release.sh)
+dist/
