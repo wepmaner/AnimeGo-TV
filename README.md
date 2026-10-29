@@ -2,7 +2,7 @@
   <img src="design/logo/animego-icon.svg" width="120" alt="AnimeGoTV icon">
 </p>
 
-<h1 align="center">AnimeGoTV-Samsung</h1>
+<h1 align="center">AnimeGo-TV</h1>
 
 <p align="center">
   <b>English</b> · <a href="README.ru.md">Русский</a>

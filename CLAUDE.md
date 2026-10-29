@@ -1,6 +1,6 @@
 # AnimeGo TV
 
-Репозиторий: **AnimeGoTV-Samsung**.
+Репозиторий: **AnimeGo-TV** (github.com/wepmaner/AnimeGo-TV), приложение на ТВ называется AnimeGoTV.
 
 Приложение для Samsung TV, через которое можно смотреть аниме с animego.me без браузера.
 

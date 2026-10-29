@@ -11,7 +11,7 @@ export MSYS_NO_PATHCONV=1
 
 VERSION=${1:?"Использование: scripts/release.sh X.Y.Z [--dry-run]"}
 DRY=0; [ "${2:-}" = "--dry-run" ] && DRY=1
-REPO=wepmaner/AnimeGoTV-Samsung
+REPO=wepmaner/AnimeGo-TV
 PKG=ru.animego.tv
 # SHA-256 сертификата автора (тестовый author_test.p12 из Tizen.NET.Sdk 1.2.1). Менять только осознанно:
 # пакет с другой подписью ТВ поверх старого не поставит.
