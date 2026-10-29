@@ -19,6 +19,17 @@ namespace AnimeGo.Core.Tests
             Assert.Equal((62542, "Jam Club", 3, 1), r.Value);
         }
 
+        // Новые тайтлы (с осени 2026): озвучка в параметре dubbing.
+        [Fact]
+        public void ParseIframeUrl_DubbingQuery()
+        {
+            Assert.Equal((63293, "Jam Club", 1, 1), Cvh.ParseIframeUrl("https://animego.me/cdn-iframe/63293/1/1?dubbing=Jam%20Club").Value);
+            Assert.Equal((63293, "Студийная Банда", 1, 1), Cvh.ParseIframeUrl(
+                "https://animego.me/cdn-iframe/63293/1/1?dubbing=%D0%A1%D1%82%D1%83%D0%B4%D0%B8%D0%B9%D0%BD%D0%B0%D1%8F%20%D0%91%D0%B0%D0%BD%D0%B4%D0%B0").Value);
+            Assert.Equal((63293, "Jam Club", 2, 12), Cvh.ParseIframeUrl("https://animego.me/cdn-iframe/63293/2/12?x=1&dubbing=Jam+Club").Value);
+            Assert.Null(Cvh.ParseIframeUrl("https://animego.me/cdn-iframe/63293/1/1"));
+        }
+
         [Fact]
         public void ParseIframeUrl_NotCvh() =>
             Assert.Null(Cvh.ParseIframeUrl("https://aniboom.one/embed/abc?episode=1"));

@@ -1,0 +1,1 @@
+{"found":true,"results":[{"interval":{"startTime":0,"endTime":95.04},"skipType":"op","skipId":"c9194490-f00a-44d4-9666-2f00daab2059","episodeLength":1440.045},{"interval":{"startTime":1335,"endTime":1440.06},"skipType":"ed","skipId":"b2fe307a-0c1b-4de1-9162-26a40951b434","episodeLength":1440.064}],"message":"Successfully found skip times","statusCode":200}

@@ -17,5 +17,12 @@ namespace AnimeGo.Core
 
         public async Task<StreamSet> AniboomStreamsAsync(VideoSource s) =>
             AniboomParser.Parse(await GetHtmlAsync(AniboomParser.EmbedUrl(s.PlayerUrl)).ConfigureAwait(false));
+
+        // JSON aniskip для серии или null: нет таймингов (сервис отвечает 404), нет связи — плеер обойдётся без них.
+        public async Task<string> AniskipAsync(int malId, int episode)
+        {
+            try { return await GetAjaxAsync(Aniskip.Url(malId, episode)).ConfigureAwait(false); }
+            catch (ApiException) { return null; }
+        }
     }
 }

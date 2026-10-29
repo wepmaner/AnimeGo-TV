@@ -271,5 +271,32 @@ namespace AnimeGo.Core.Tests
             });
             Assert.Equal("привет", await new SiteApi(new CookieJar(), h).GetHtmlAsync("/"));
         }
+
+        [Fact]
+        public async Task Aniskip_Found_NoSiteHeaders()
+        {
+            var h = new FakeHandler(r => FakeHandler.Json(Fixture.Read("aniskip_62542_1.json")));
+            var json = await new SiteApi(new CookieJar(), h).AniskipAsync(62542, 1);
+            Assert.Contains("\"op\"", json);
+            var r0 = h.Requests[0];
+            Assert.Equal(Aniskip.Url(62542, 1), r0.RequestUri.ToString());
+            Assert.Null(Header(r0, "X-Requested-With"));
+            Assert.Null(Header(r0, "Referer"));
+        }
+
+        // Нет таймингов — сервис отвечает 404; нет связи — тоже null, а не исключение.
+        [Fact]
+        public async Task Aniskip_NotFound_Null()
+        {
+            var h = new FakeHandler(r => FakeHandler.Json(Fixture.Read("aniskip_62542_5.json"), HttpStatusCode.NotFound));
+            Assert.Null(await new SiteApi(new CookieJar(), h).AniskipAsync(62542, 5));
+        }
+
+        [Fact]
+        public async Task Aniskip_Network_Null()
+        {
+            var h = new FakeHandler(r => throw new HttpRequestException("down"));
+            Assert.Null(await new SiteApi(new CookieJar(), h).AniskipAsync(62542, 1));
+        }
     }
 }

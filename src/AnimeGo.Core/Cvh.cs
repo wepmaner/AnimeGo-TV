@@ -10,20 +10,31 @@ namespace AnimeGo.Core
     // CVH (cdnvideohub): чистая часть — адреса и разбор ответов, без сети.
     public static class Cvh
     {
+        // Два вида адреса: /cdn-iframe/{titleId}/{озвучка}/{сезон}/{серия} и (у новых тайтлов)
+        // /cdn-iframe/{titleId}/{сезон}/{серия}?dubbing={озвучка}.
         static readonly Regex IframeRx = new Regex(
             @"/cdn-iframe/(\d+)/([^/?#]+)/(\d+)/(\d+)",
+            RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        static readonly Regex IframeQueryRx = new Regex(
+            @"/cdn-iframe/(\d+)/(\d+)/(\d+)/?\?(?:[^#]*&)?dubbing=([^&#]+)",
             RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
         public static (int titleId, string voice, int season, int episode)? ParseIframeUrl(string playerUrl)
         {
-            var m = IframeRx.Match(playerUrl ?? "");
-            if (!m.Success) return null;
-            string voice;
-            try { voice = Uri.UnescapeDataString(m.Groups[2].Value); }
-            catch (UriFormatException) { voice = m.Groups[2].Value; }
-            return (int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture), voice,
-                int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture),
-                int.Parse(m.Groups[4].Value, CultureInfo.InvariantCulture));
+            var url = playerUrl ?? "";
+            var m = IframeRx.Match(url);
+            if (m.Success) return (Int(m.Groups[1]), Unescape(m.Groups[2].Value), Int(m.Groups[3]), Int(m.Groups[4]));
+            m = IframeQueryRx.Match(url);
+            if (m.Success) return (Int(m.Groups[1]), Unescape(m.Groups[4].Value.Replace('+', ' ')), Int(m.Groups[2]), Int(m.Groups[3]));
+            return null;
+        }
+
+        static int Int(Group g) => int.Parse(g.Value, CultureInfo.InvariantCulture);
+
+        static string Unescape(string s)
+        {
+            try { return Uri.UnescapeDataString(s); }
+            catch (UriFormatException) { return s; }
         }
 
         public static string PlaylistUrl(int titleId) =>

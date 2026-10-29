@@ -16,7 +16,7 @@
 <p align="center">
   <img alt="Платформа" src="https://img.shields.io/badge/platform-Samsung%20Tizen%205.5%2B-1428A0">
   <img alt=".NET" src="https://img.shields.io/badge/.NET-Tizen.NET%20(ElmSharp)-512BD4">
-  <img alt="Тесты" src="https://img.shields.io/badge/tests-166%20passing-2ea44f">
+  <img alt="Тесты" src="https://img.shields.io/badge/tests-201%20passing-2ea44f">
 </p>
 
 > [!NOTE]
@@ -83,4 +83,4 @@ TV=<ip-тв>:26101 scripts/deploy.sh Debug  # Debug-сборка шлёт DevLog
 - Потоки Kodik не воспроизводятся; используются CVH и AniBoom.
 - Родная клавиатура телевизора из приложения работает ненадёжно, поэтому своя.
 - Первая загрузка постеров после запуска занимает несколько секунд (WebP декодируется на ТВ), дальше — из кеша.
-- Пропуск опенинга пока эвристический; точные тайминги из aniskip — в планах.
+- Пропуск опенинга берёт тайминги из [aniskip](https://aniskip.com), если они есть; иначе запоминает ваше первое нажатие на тайтле.

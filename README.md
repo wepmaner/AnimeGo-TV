@@ -16,7 +16,7 @@
 <p align="center">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Samsung%20Tizen%205.5%2B-1428A0">
   <img alt=".NET" src="https://img.shields.io/badge/.NET-Tizen.NET%20(ElmSharp)-512BD4">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-166%20passing-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-201%20passing-2ea44f">
 </p>
 
 > [!NOTE]
@@ -83,4 +83,4 @@ Docs: [design spec](docs/superpowers/specs/2026-10-27-animego-tv-design.md) · [
 - Kodik streams are not playable; CVH and AniBoom are used.
 - The TV's native keyboard can't be used reliably from an app, so the app has its own.
 - The first poster load after launch takes a few seconds (WebP is decoded on the TV), then posters come from the cache.
-- Opening skip is a heuristic for now; exact timings from aniskip are planned.
+- Opening skip uses [aniskip](https://aniskip.com) timings when they exist; otherwise it learns from your first press on each title.

@@ -387,6 +387,6 @@ scripts/deploy.sh (TV=ip:port параметром), scripts/devlog.mjs, scripts
 - `public sealed class SkipInterval { int StartSec; int EndSec; }`; `public static class Aniskip { string Url(int malId, int episode); SkipInterval ParseOpening(string json, int cvhDurationSec) /* берёт op; сдвиг = cvhDuration − episodeLength, применяется при 0 ≤ сдвиг ≤ 60, иначе null */ }`.
 - Поведение: при старте серии запросить aniskip по `titleId` из CVH-источника (у AniBoom — нет id → только запомненная позиция). Если интервал есть: кнопка «Пропустить опенинг» видна только внутри `[Start−5, End]`, OK → `Seek(End)`; при `pos` в интервале и без нажатий — ничего не делаем (автопропуск не включаем). Если данных нет — текущая логика (`Prefs.OpeningAt` + 85/90 с).
 
-- [ ] **Step 1:** сохранить `research/samples/aniskip_62542_1.json`; тесты: `ParseOpening(json, 1440)` → `164–249` (сдвиг 20 → `184–269`? — проверить правило на реальных числах: episodeLength 1420, cvh 1440 → сдвиг 20); `ParseOpening(json, 1500)` → null (сдвиг 80); `found:false` → null.
-- [ ] **Step 2:** реализовать, деплой, проверка на ТВ: на серии 2 «Необъятного океана 3» кнопка появляется в опенинге и исчезает после него.
-- [ ] **Step 3:** Commit `feat: пропуск опенинга по aniskip`.
+- [x] **Step 1:** сохранить `research/samples/aniskip_62542_1.json`; тесты: `ParseOpening(json, 1440)` → `164–249` (сдвиг 20 → `184–269`? — проверить правило на реальных числах: episodeLength 1420, cvh 1440 → сдвиг 20); `ParseOpening(json, 1500)` → null (сдвиг 80); `found:false` → null.
+- [x] **Step 2:** реализовать, деплой, проверка на ТВ: на серии 2 «Необъятного океана 3» кнопка появляется в опенинге и исчезает после него.
+- [x] **Step 3:** Commit `feat: пропуск опенинга по aniskip`.

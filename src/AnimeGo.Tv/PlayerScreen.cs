@@ -40,6 +40,9 @@ namespace AnimeGo.Tv
         ProgressReporter reporter;
         WatchedTracker watched;    // одна на серию: смена источника не обнуляет просмотренные секунды
         Episode watchedFor;
+        string skipJson;           // ответ aniskip для серии; null — нет данных (ещё не пришёл или таймингов нет)
+        SkipInterval opening;      // опенинг из aniskip под длительность того, что играет
+        int openingDur;            // для какой длительности посчитан opening
         int attempt, number, srcIndex, resumeSec, lastPos, nextNumber;
         long clickAt, lastSeekKeyAt, holdFrom, lastSeekAt;
         int lastSeekDir;
@@ -103,6 +106,9 @@ namespace AnimeGo.Tv
             failed = false;
             endShown = endCancelled = false;
             lastPos = 0;
+            skipJson = null;
+            opening = null;
+            openingDur = 0;
             clickAt = Clock.Ms;
             blackout.Show();
             loading.Show();
@@ -156,7 +162,26 @@ namespace AnimeGo.Tv
             dubTitle = PlayerSources.Title(key, info, v);
             sources = PlayerSources.For(key, v.Sources);
             panel.SetCurrent(animeId, ep.Number);
+            LoadOpening(n, v);
             TrySource(n, 0, start);
+        }
+
+        // Тайминги опенинга из aniskip: titleId CVH = MAL id. Берём любой CVH-источник серии, даже если играет AniBoom.
+        void LoadOpening(int n, EpisodeVideos v)
+        {
+            var cvh = v.Sources.Where(s => s.Provider == "cvh").Select(s => Cvh.ParseIframeUrl(s.PlayerUrl)).FirstOrDefault(x => x != null);
+            if (cvh == null) return;
+            var (malId, _, _, ep) = cvh.Value;
+            Task.Run(async () =>
+            {
+                var json = await app.Api.AniskipAsync(malId, ep).ConfigureAwait(false);
+                App.Ui(() =>
+                {
+                    if (!alive || n != attempt) return;
+                    skipJson = json;
+                    DevLog.Write("aniskip: " + malId + "/" + ep + (json == null ? " нет данных" : " есть ответ"));
+                });
+            });
         }
 
         void TrySource(int n, int i, int start)
@@ -277,9 +302,19 @@ namespace AnimeGo.Tv
             }
             if (video.IsPlaying || video.IsPaused) reporter?.Tick(p);
             panel.SetPosition(video.TargetSec, d);
-            panel.SetSkip(video.TargetSec < SkipUntilSec);
+            UpdateOpening(d);
+            var t = video.TargetSec;
+            panel.SetSkip(opening != null ? t >= opening.StartSec - 5 && t < opening.EndSec : t < SkipUntilSec);
             if (d > 0 && p < d - EndLeadSec - 5) endCancelled = false;
             if (d > 0 && p >= d - EndLeadSec && video.IsPlaying && !endShown && !endCancelled) ShowEnd(false);
+        }
+
+        void UpdateOpening(int d)
+        {
+            if (skipJson == null || d <= 0 || d == openingDur) return;
+            openingDur = d;
+            opening = Aniskip.ParseOpening(skipJson, d);
+            DevLog.Write("aniskip: длительность " + d + (opening == null ? " — тайминги не подходят" : " → опенинг " + opening.StartSec + "–" + opening.EndSec));
         }
 
         int Duration
@@ -406,12 +441,18 @@ namespace AnimeGo.Tv
             panel.SetPosition(target, d);
         }
 
-        // «Пропустить опенинг» (спека §9): API времени опенинга не даёт, поэтому учимся по нажатиям. Первое нажатие
+        // «Пропустить опенинг» (спека §9): есть тайминги aniskip — на конец опенинга. Нет — учимся по нажатиям: первое
         // запоминает, где у тайтла начинается опенинг; дальше нажатие до него (или в первые 10 с) — сразу за опенинг.
         void SkipOpening()
         {
             if (pending || failed || episode == null) return;
             var pos = video.TargetSec;
+            if (opening != null && pos < opening.EndSec)
+            {
+                DevLog.Write("skip: " + pos + " → " + opening.EndSec + " (aniskip)");
+                SeekBy(opening.EndSec - pos, true);
+                return;
+            }
             var at = app.Prefs.OpeningAt(app.UserKey, animeId);
             int target;
             if (at != null && pos <= at.Value + 10)
