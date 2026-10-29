@@ -12,7 +12,7 @@ namespace AnimeGo.Tv
     // Источник не завёлся (ошибка, нет Playing за 10 с) — следующий. Позицию шлёт ProgressReporter.
     sealed partial class PlayerScreen : IScreen
     {
-        const int StartTimeoutSec = 10, IdleSec = 5, EndLeadSec = 10, Countdown = 5, SkipSec = 90, SkipUntilSec = 240;
+        const int StartTimeoutSec = 10, IdleSec = 5, EndLeadSec = 10, Countdown = 5;
 
         readonly App app;
         readonly int animeId, startNumber, startSec;
@@ -24,6 +24,8 @@ namespace AnimeGo.Tv
         readonly Rectangle blackout;
         readonly Label loading;
         readonly EndOverlay end;
+        readonly SkipOverlay skipOverlay;
+        Episode skipShownFor;      // кнопка поверх видео — один раз на серию
         // Таймеры EFL — в полях (GC), все останавливаются в Hide.
         readonly UiTimer tick = new UiTimer(), idle = new UiTimer(), watchdog = new UiTimer(), failTimer = new UiTimer();
 
@@ -64,6 +66,8 @@ namespace AnimeGo.Tv
             panel.Upcoming = (row, n) => row.Season.AnimeId == animeId ? Release.Of(seasons.Anime, n) : null;
             loading = ui.Text(Theme.Margin, Theme.H - Theme.Margin - 40, 600, 40, Theme.T(RuText.Loading, 26, Theme.MutedHex), false);
             end = new EndOverlay(ui) { Watch = WatchNext, Cancel = () => endCancelled = true };
+            skipOverlay = new SkipOverlay(ui);
+            panel.SetSkip(false);   // пропуск опенинга — только кнопкой поверх видео и только по таймингам aniskip
         }
 
         public void Show()
@@ -86,6 +90,7 @@ namespace AnimeGo.Tv
             FinishReporter();
             foreach (var t in new[] { tick, idle, watchdog, failTimer }) t.Stop();
             end.Hide();
+            skipOverlay.Hide();
             video.Stop();
             ui.Dispose();
         }
@@ -99,6 +104,7 @@ namespace AnimeGo.Tv
             FinishReporter();
             watchdog.Stop();
             end.Hide();
+            skipOverlay.Hide();
             video.Stop();
             number = num;
             episode = null;
@@ -305,7 +311,7 @@ namespace AnimeGo.Tv
             panel.SetPosition(video.TargetSec, d);
             UpdateOpening(d);
             var t = video.TargetSec;
-            panel.SetSkip(opening != null ? t >= opening.StartSec - 5 && t < opening.EndSec : t < SkipUntilSec);
+            MaybeShowSkip(t);
             if (d > 0 && p < d - EndLeadSec - 5) endCancelled = false;
             if (d > 0 && p >= d - EndLeadSec && video.IsPlaying && !endShown && !endCancelled) ShowEnd(false);
         }
@@ -343,6 +349,12 @@ namespace AnimeGo.Tv
             if (key.StartsWith("XF86Audio", StringComparison.Ordinal) || key == Keys.Exit) return false;   // громкость — телевизору
             if (failed) { if (key == Keys.Back) Exit(); return true; }
             if (end.Visible) return end.OnKey(key);
+            if (skipOverlay.Visible && !panel.Visible)
+            {
+                // Кнопка «Пропустить опенинг» поверх видео в фокусе: OK — пропустить, «Назад» — убрать.
+                if (key == Keys.Ok) { skipOverlay.Hide(); SkipOpening(); return true; }
+                if (key == Keys.Back) { skipOverlay.Hide(); return true; }
+            }
             if (!panel.Visible)
             {
                 // ↓ — полная панель с фокусом на кнопках; любая другая — компактная (полоса + кнопки внизу).
@@ -387,7 +399,6 @@ namespace AnimeGo.Tv
                     case EpisodePanel.Dub: OpenDubs(); break;
                     case EpisodePanel.Quality: OpenQuality(); break;
                     case EpisodePanel.Next: PlayNext(); break;
-                    case EpisodePanel.Skip: SkipOpening(); break;
                 }
                 return;
             }
@@ -407,6 +418,16 @@ namespace AnimeGo.Tv
             if (ep.Number != number || failed) { var _ = PlayEpisodeAsync(ep.Number, 0); }
         }
 
+        // Опенинг по aniskip начался, панель скрыта — кнопка поверх видео. Нет таймингов — нет и кнопки.
+        void MaybeShowSkip(int t)
+        {
+            if (skipShownFor == episode || panel.Visible || !video.IsPlaying || end.Visible || opening == null) return;
+            if (t < opening.StartSec || t >= opening.EndSec - 10) return;
+            skipShownFor = episode;
+            DevLog.Write("skip: кнопка поверх видео на " + t);
+            skipOverlay.Show();
+        }
+
         void TogglePause()
         {
             if (pending || failed || choice != null) return;   // под панелью выбора видео стоит
@@ -414,6 +435,8 @@ namespace AnimeGo.Tv
             {
                 video.Pause();
                 reporter?.Pause();
+                // Пауза любой кнопкой (и Play/Pause пульта) — панель: сразу видно, что команда сработала.
+                if (!panel.Visible) ShowPanel(EpisodePanel.Mode.Compact, EpisodePanel.Zone.Bar);
             }
             else if (video.IsPaused) video.Resume();
             UpdateButtons();
@@ -444,40 +467,21 @@ namespace AnimeGo.Tv
             panel.SetPosition(target, d);
         }
 
-        // «Пропустить опенинг» (спека §9): есть тайминги aniskip — на конец опенинга. Нет — учимся по нажатиям: первое
-        // запоминает, где у тайтла начинается опенинг; дальше нажатие до него (или в первые 10 с) — сразу за опенинг.
+        // «Пропустить опенинг» (спека §9): только по таймингам aniskip — на конец опенинга. Без них кнопки нет.
         void SkipOpening()
         {
-            if (pending || failed || episode == null) return;
+            if (pending || failed || episode == null || opening == null) return;
             var pos = video.TargetSec;
-            if (opening != null && pos < opening.EndSec)
-            {
-                DevLog.Write("skip: " + pos + " → " + opening.EndSec + " (aniskip)");
-                SeekBy(opening.EndSec - pos, true);
-                return;
-            }
-            var at = app.Prefs.OpeningAt(app.UserKey, animeId);
-            int target;
-            if (at != null && pos <= at.Value + 10)
-            {
-                target = at.Value + SkipSec;
-                DevLog.Write("skip: " + pos + " → " + target + " (опенинг с " + at + ")");
-            }
-            else
-            {
-                target = pos + SkipSec;
-                // Запоминаем только более раннее начало: позднее нажатие (уже посреди опенинга) не портит выученное.
-                var learn = pos < SkipUntilSec && (at == null || pos < at.Value);
-                if (learn) { app.Prefs.SetOpeningAt(app.UserKey, animeId, pos); app.SavePrefs(); }
-                DevLog.Write("skip: " + pos + " → " + target + (learn ? " (запомнил опенинг с " + pos + ")" : ""));
-            }
-            SeekBy(target - pos, true);
+            if (pos >= opening.EndSec) return;
+            DevLog.Write("skip: " + pos + " → " + opening.EndSec + " (aniskip)");
+            SeekBy(opening.EndSec - pos, true);
         }
 
         // ---- панель ----
 
         void ShowPanel(EpisodePanel.Mode mode, EpisodePanel.Zone zone)
         {
+            skipOverlay.Hide();   // в панели своя кнопка «Пропустить опенинг»
             panel.SetPosition(video.TargetSec, Duration);
             panel.Show(mode, zone);
             Toast.Raise();   // панель поднимает свои виджеты наверх — плашка не должна оказаться под ней

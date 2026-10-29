@@ -83,4 +83,4 @@ Docs: [design spec](docs/superpowers/specs/2026-10-27-animego-tv-design.md) · [
 - Sources are tried in order CVH → AniBoom → Kodik; Kodik's player is reverse-engineered and may break when they change it.
 - The TV's native keyboard can't be used reliably from an app, so the app has its own.
 - The first poster load after launch takes a few seconds (WebP is decoded on the TV), then posters come from the cache.
-- Opening skip uses [aniskip](https://aniskip.com) timings when they exist; otherwise it learns from your first press on each title.
+- “Skip opening” appears over the video only when [aniskip](https://aniskip.com) has timings for the episode; coverage is partial.
