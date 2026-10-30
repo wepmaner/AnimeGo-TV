@@ -450,6 +450,7 @@ namespace AnimeGo.Tv
             else if (!pause && video.IsPaused) video.Resume();
             else return;
             UpdateButtons();
+            if (panel.Visible) RestartIdle();   // Play/Pause пульта идут мимо клавиш панели — отсчёт скрытия заново отсюда
         }
 
         // ±10 с; удержание (повтор KeyDown чаще 450 мс) — шаг 20/40/80 с после 1/2/3 с удержания.
@@ -514,12 +515,15 @@ namespace AnimeGo.Tv
         }
 
         // 5 с без нажатий: панель прячется, если фокус не в рядах; на паузе полная сворачивается в компактную.
+        // Таймер повторяется, пока панель видна: видео могло продолжиться без клавиш панели (Play пульта, закрытие
+        // выбора озвучки) — тогда панель спрячется на следующем срабатывании, а не повиснет до нажатия.
         void RestartIdle() => idle.Start(IdleSec, () =>
         {
-            if (!panel.Visible || panel.Focus == EpisodePanel.Zone.Rows) return;
-            if (!video.IsPaused) panel.Hide();
+            if (!panel.Visible) { idle.Stop(); return; }
+            if (panel.Focus == EpisodePanel.Zone.Rows) return;
+            if (!video.IsPaused) { panel.Hide(); idle.Stop(); }
             else if (panel.State == EpisodePanel.Mode.Full) ShowPanel(EpisodePanel.Mode.Compact, panel.Focus);
-        });
+        }, true);
 
         void UpdateButtons() => panel.SetButtons(video.IsPaused, dubTitle ?? "—", quality);
 
