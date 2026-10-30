@@ -22,7 +22,7 @@ namespace AnimeGo.Tv
         readonly VideoView video;
         readonly EpisodePanel panel;
         readonly Rectangle blackout;
-        readonly Label loading;
+        readonly Spinner loading;   // колесико по центру, пока видео не пошло; панель при этом доступна
         readonly EndOverlay end;
         readonly SkipOverlay skipOverlay;
         Episode skipShownFor;      // кнопка поверх видео — один раз на серию
@@ -64,7 +64,7 @@ namespace AnimeGo.Tv
             panel = new EpisodePanel(ui);
             seasons = new SeasonRows(app, animeId, animeUrl, panel) { Loaded = UpdateTitle };
             panel.Upcoming = (row, n) => row.Season.AnimeId == animeId ? Release.Of(seasons.Anime, n) : null;
-            loading = ui.Text(Theme.Margin, Theme.H - Theme.Margin - 40, 600, 40, Theme.T(RuText.Loading, 26, Theme.MutedHex), false);
+            loading = new Spinner(ui, Theme.W / 2, Theme.H / 2);
             end = new EndOverlay(ui) { Watch = WatchNext, Cancel = () => endCancelled = true };
             skipOverlay = new SkipOverlay(ui);
             panel.SetSkip(false);   // пропуск опенинга — только кнопкой поверх видео и только по таймингам aniskip
@@ -89,9 +89,10 @@ namespace AnimeGo.Tv
             seasons.Stop();
             FinishReporter();
             foreach (var t in new[] { tick, idle, watchdog, failTimer }) t.Stop();
+            loading.Hide();
             end.Hide();
             skipOverlay.Hide();
-            video.Stop();
+            video.Release();   // не Stop: иначе чёрный кадр, пока рисуется следующий экран
             ui.Dispose();
         }
 
@@ -130,9 +131,11 @@ namespace AnimeGo.Tv
                 string why = null;
                 try
                 {
-                    if (pi == null) pi = await app.Api.PlayerAsync(animeId).ConfigureAwait(false);
+                    // Через кеш приложения: со страницы тайтла и экрана серий /player уже есть; ссылки на потоки всё равно
+                    // запрашиваются заново в PlayerSources.FetchAsync (они подписаны по IP и времени).
+                    if (pi == null) pi = await app.PlayerInfoAsync(animeId).ConfigureAwait(false);
                     ep = pi.Episodes.FirstOrDefault(e => e.Number == num);
-                    if (ep != null) v = await app.Api.EpisodeVideosAsync(ep.Id).ConfigureAwait(false);
+                    if (ep != null) v = await app.EpisodeVideosAsync(ep.Id).ConfigureAwait(false);
                     else why = "нет серии " + num + " из " + pi.Episodes.Count;
                 }
                 catch (Exception e) { why = Why(e); }
@@ -341,7 +344,9 @@ namespace AnimeGo.Tv
                 return choice.OnKey(key);   // панель выбора модальна; громкость и Stop — как обычно
             switch (key)
             {
-                case Keys.Play: case Keys.Pause: case Keys.PlayPause: TogglePause(); return true;
+                case Keys.Pause: SetPaused(true); return true;    // «Пауза» только ставит на паузу
+                case Keys.Play: SetPaused(false); return true;    // «Играть» только продолжает
+                case Keys.PlayPause: TogglePause(); return true;
                 case Keys.Stop: Exit(); return true;
                 case Keys.FF: SeekKey(1); return true;
                 case Keys.Rew: SeekKey(-1); return true;
@@ -373,7 +378,7 @@ namespace AnimeGo.Tv
             switch (key)
             {
                 case Keys.Back: BackInPanel(); break;
-                case Keys.Up: panel.Up(); break;
+                case Keys.Up: if (!panel.Up()) HidePanel(); break;   // выше полосы некуда — панель закрывается, как по «Назад»
                 case Keys.Down:
                     var was = panel.State;
                     panel.Down();
@@ -428,17 +433,22 @@ namespace AnimeGo.Tv
             skipOverlay.Show();
         }
 
-        void TogglePause()
+        void TogglePause() => SetPaused(video.IsPlaying);
+
+        // pause — поставить на паузу (если играет), иначе продолжить (если на паузе); в другом состоянии ничего не делает,
+        // поэтому «Пауза» пульта не запускает видео, а «Играть» не останавливает.
+        void SetPaused(bool pause)
         {
             if (pending || failed || choice != null) return;   // под панелью выбора видео стоит
-            if (video.IsPlaying)
+            if (pause && video.IsPlaying)
             {
                 video.Pause();
                 reporter?.Pause();
-                // Пауза любой кнопкой (и Play/Pause пульта) — панель: сразу видно, что команда сработала.
+                // Пауза любой кнопкой (и Pause пульта) — панель: сразу видно, что команда сработала.
                 if (!panel.Visible) ShowPanel(EpisodePanel.Mode.Compact, EpisodePanel.Zone.Bar);
             }
-            else if (video.IsPaused) video.Resume();
+            else if (!pause && video.IsPaused) video.Resume();
+            else return;
             UpdateButtons();
         }
 

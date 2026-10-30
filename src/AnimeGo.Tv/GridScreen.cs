@@ -56,21 +56,33 @@ namespace AnimeGo.Tv
         public static string Url(int tab) => "/profile/?type=" + All[tab].Type;
     }
 
+    // Что уже показали по этому адресу или запросу: все догруженные страницы и состояние пагинации. Лежит в App.Cache,
+    // чтобы по «Назад» со страницы тайтла сетка вернулась на то же место без запросов и «Загрузки».
+    sealed class GridCache
+    {
+        public List<AnimeCard> Cards = new List<AnimeCard>();
+        public Paging Paging;
+        public string NextFrame;
+    }
+
     // Каталог / поиск / «Мой список» (спека §5.3–5.4): заголовок, для списка — вкладки, для поиска — строка запроса,
     // ниже сетка постеров по 6 в ряд. Каталог (Browse) — слева список жанров, справа сетка по 5.
     // Следующая страница грузится заранее, когда до конца осталось 2 строки. «Назад» — на прежний экран.
+    // Данные из App.Cache рисуются сразу; старше FreshSec — первая страница перепроверяется в фоне.
     sealed class GridScreen : IScreen
     {
         const int TitleY = 40, BarY = 110, BarH = 52, QueryH = 64, PillFont = 20, CharW = 11;
         const int SideW = 360, SideGap = 48, ItemH = 50, ItemGap = 4, GridLeft = Theme.Margin + SideW + SideGap;
         const double SideDelay = 0.5;   // с: жанр под фокусом открывается, когда список перестали листать
+        const int FreshSec = 600;
         enum Area { Bar, Grid, Side }   // Bar — вкладки или строка запроса, Side — список жанров
 
         readonly App app;
         readonly GridSource src;
         readonly Widgets ui;
         readonly Grid grid;
-        readonly Label status, more, head;
+        readonly Label status, head;
+        readonly Spinner more;   // догрузка следующей страницы — под последней строкой
         readonly List<EvasObject> side = new List<EvasObject>();
         readonly UiTimer sideTimer = new UiTimer();
         int sideFocus;
@@ -80,6 +92,7 @@ namespace AnimeGo.Tv
         Label query;
         MessageView overlay;
         OnScreenKeyboard keyboard;
+        GridCache cache;      // запись кеша того, что сейчас в сетке (тот же объект, что в App.Cache)
         Paging paging;        // бесконечная прокрутка каталога; null — её нет
         string nextFrame;     // следующая страница «Моего списка»; null — нет
         Area area = Area.Grid;
@@ -102,7 +115,7 @@ namespace AnimeGo.Tv
             var top = src.IsSearch || src.MyList ? BarY + QueryH + 32 : BarY;
             grid = src.Browse ? new Grid(ui, app.Images, top, GridLeft, Theme.W - Theme.Margin - GridLeft, 5) : new Grid(ui, app.Images, top);
             status = ui.Text(left, top + 40, Theme.W - Theme.Margin - left, 48, "", false);
-            more = ui.Text(left, 0, 600, 40, Theme.T(RuText.Loading, 24, Theme.MutedHex), false);
+            more = new Spinner(ui, left + 14, 0, 14, 4, Theme.Muted);
             sideFocus = src.Genre;
             if (src.Browse) BuildSide();
             if (src.MyList) BuildTabs();
@@ -114,7 +127,7 @@ namespace AnimeGo.Tv
             alive = true;
             if (!src.IsSearch) { Load(true); return; }
             if (string.IsNullOrEmpty(src.Query)) { SetArea(Area.Bar); OpenKeyboard(); }
-            else Search(src.Query);   // вернулись со страницы тайтла — тот же запрос
+            else Load(false, true);   // вернулись со страницы тайтла — тот же запрос
         }
 
         public void Hide()
@@ -122,6 +135,8 @@ namespace AnimeGo.Tv
             alive = false;
             generation++;
             sideTimer.Stop();
+            more.Hide();
+            grid.HideSkeleton();
             keyboard?.Close();
             keyboard = null;
             overlay?.Hide();
@@ -209,17 +224,33 @@ namespace AnimeGo.Tv
 
         // ---- данные ----
 
-        // Первая страница. full — на весь экран «Загрузка…» (вход на экран), иначе строка статуса (смена вкладки).
+        // Первая страница (или результаты поиска). full — вход на экран: ошибка без кеша на весь экран, иначе строкой статуса.
         void Load(bool full) => Load(full, full && !src.StartInSide);
+
+        string CacheKey => src.IsSearch ? "search:" + src.Query : "grid:" + src.FirstPageUrl;
+        string Empty => src.MyList ? RuText.EmptyList : RuText.NothingFound;
+        string What => src.IsSearch ? "search \"" + src.Query + "\"" : "grid " + src.Title + (src.MyList ? " " + MyListTabs.All[src.Tab].Name : "");
 
         void Load(bool full, bool toGrid)
         {
             var n = ++generation;
+            var key = CacheKey;
+            var q = src.Query;
             var url = src.FirstPageUrl;
-            DevLog.Write("grid: load " + url);
+            DevLog.Write(What + ": load");
             Reset();
-            if (full) ShowOverlay(new MessageView(app, RuText.Loading, null, app.Back));
-            else SetStatus(RuText.Loading);
+            var hit = app.Cache.TryGet(key, out GridCache c, out var age);
+            if (hit)
+            {
+                // Всё, что успели долистать, — сразу; фокус восстановится без догрузки страниц.
+                cache = c;
+                paging = c.Paging;
+                nextFrame = c.NextFrame;
+                DevLog.Write(What + ": кеш, " + c.Cards.Count + " cards, " + (int)age + " с");
+                Fill(c.Cards, Empty, toGrid);
+                if (age < FreshSec) return;
+            }
+            else grid.ShowSkeleton();
             Task.Run(async () =>
             {
                 IReadOnlyList<AnimeCard> cards = null;
@@ -227,10 +258,14 @@ namespace AnimeGo.Tv
                 string next = null, why = null;
                 try
                 {
-                    var html = await app.Api.GetHtmlAsync(url).ConfigureAwait(false);
-                    cards = CatalogParser.Cards(html);
-                    p = CatalogParser.Paging(html);
-                    next = CatalogParser.NextFrameUrl(html);
+                    if (src.IsSearch) cards = await app.Api.SearchAsync(q).ConfigureAwait(false);
+                    else
+                    {
+                        var html = await app.Api.GetHtmlAsync(url).ConfigureAwait(false);
+                        cards = CatalogParser.Cards(html);
+                        p = CatalogParser.Paging(html);
+                        next = src.MyList ? CatalogParser.NextFrameUrl(html) : null;
+                    }
                 }
                 catch (Exception e) { why = Why(e); }
                 App.Ui(() =>
@@ -238,46 +273,44 @@ namespace AnimeGo.Tv
                     if (!alive || n != generation) return;
                     if (cards == null)
                     {
-                        DevLog.Write("grid: " + src.Title + " ошибка " + why);
+                        DevLog.Write(What + ": ошибка " + why);
+                        if (hit) return;   // на экране кеш
+                        grid.HideSkeleton();
                         if (full) ShowOverlay(new MessageView(app, RuText.NoConnection, () => Load(true), app.Back));
                         else SetStatus(RuText.NoConnection + " · " + RuText.RetryHint);
                         return;
                     }
+                    if (hit)
+                    {
+                        // Начало не изменилось — оставляем всё долистанное, запись просто помолодела.
+                        if (SamePrefix(cache.Cards, cards)) { app.Cache.Put(key, cache); DevLog.Write(What + ": без изменений"); return; }
+                        DevLog.Write(What + ": изменилось — заново");
+                        src.Focus = grid.Focus;
+                        generation++;   // догрузка страницы к старому списку, если идёт, уже не нужна
+                        Reset();
+                    }
                     ShowOverlay(null);
+                    cache = new GridCache { Cards = cards.ToList(), Paging = p, NextFrame = next };
+                    app.Cache.Put(key, cache);
                     paging = p;
-                    nextFrame = src.MyList ? next : null;
-                    DevLog.Write("grid: " + src.Title + (src.MyList ? " " + MyListTabs.All[src.Tab].Name : "") + " " + cards.Count + " cards" +
-                        (paging?.HasMore == true || nextFrame != null ? ", есть ещё" : ""));
-                    Fill(cards, src.MyList ? RuText.EmptyList : RuText.NothingFound, toGrid);
+                    nextFrame = next;
+                    DevLog.Write(What + ": " + cards.Count + " cards" + (HasMore ? ", есть ещё" : ""));
+                    Fill(cards, Empty, toGrid);
                 });
             });
         }
 
+        static bool SamePrefix(List<AnimeCard> have, IReadOnlyList<AnimeCard> first)
+        {
+            if (have.Count < first.Count) return false;
+            for (var i = 0; i < first.Count; i++) if (have[i].Id != first[i].Id) return false;
+            return true;
+        }
+
         void Search(string q)
         {
-            var n = ++generation;
             src.Query = q;
-            Reset();
-            SetStatus(RuText.Loading);
-            Task.Run(async () =>
-            {
-                IReadOnlyList<AnimeCard> cards = null;
-                string why = null;
-                try { cards = await app.Api.SearchAsync(q).ConfigureAwait(false); }
-                catch (Exception e) { why = Why(e); }
-                App.Ui(() =>
-                {
-                    if (!alive || n != generation) return;
-                    if (cards == null)
-                    {
-                        DevLog.Write("search: \"" + q + "\" ошибка " + why);
-                        SetStatus(RuText.NoConnection);
-                        return;
-                    }
-                    DevLog.Write("search: \"" + q + "\" " + cards.Count);
-                    Fill(cards, RuText.NothingFound, true);
-                });
-            });
+            Load(false, true);
         }
 
         // До конца осталось ≤ 2 строк — догрузить следующую страницу (в фоне, по одной за раз), чтобы ниже всегда
@@ -324,6 +357,7 @@ namespace AnimeGo.Tv
                         p.HasMore = fresh.Count > 0 && (p.TotalItems == 0 || ids.Count < p.TotalItems);
                     }
                     else nextFrame = fresh.Count > 0 && next != frameUrl ? next : null;
+                    if (cache != null) { cache.Cards.AddRange(fresh); cache.NextFrame = nextFrame; }   // Paging — тот же объект
                     DevLog.Write("grid: page " + (page > 0 ? page.ToString() : "frame") + " +" + fresh.Count);
                     grid.Append(fresh.Select(Item).ToList());
                     if (restoreTo >= 0) ContinueRestore();
@@ -354,6 +388,7 @@ namespace AnimeGo.Tv
         {
             grid.Clear();
             ids.Clear();
+            cache = null;
             paging = null;
             nextFrame = null;
             loadingMore = false;
@@ -361,12 +396,12 @@ namespace AnimeGo.Tv
             ShowMore(false);
         }
 
-        // «Загрузка…» под последней строкой, если она на экране.
+        // Спиннер под последней строкой, если она на экране.
         void ShowMore(bool on)
         {
             var y = grid.EndY + 16;
             if (!on || grid.Count == 0 || y > Theme.H - 44) { more.Hide(); return; }
-            more.Move(grid.Left, y);
+            more.MoveTo(grid.Left + 14, y + 16);
             more.Show();
         }
 

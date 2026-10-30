@@ -26,14 +26,59 @@ namespace AnimeGo.Tv
         readonly Dictionary<Image, string> wanted = new Dictionary<Image, string>();   // только UI-поток
         readonly Dictionary<string, Task<string>> loading = new Dictionary<string, Task<string>>();   // под lock
 
+        // Кеш на диске растёт без предела (постер PNG ≈ 200 КБ): при старте в фоне, если он больше MaxBytes,
+        // удаляем самые давние по времени записи, пока не станет ≤ TrimToBytes. Время записи обновляется при показе
+        // (Touch), так что «давние» — это давно не показывавшиеся.
+        const long MaxBytes = 120L << 20, TrimToBytes = 90L << 20;
+        static readonly TimeSpan TouchEvery = TimeSpan.FromHours(6);
+
         public ImageCache(string dir)
         {
             this.dir = dir;
-            // Метки .bad остались от сборок, где WebP не умели открывать, — теперь он открывается.
-            try { if (Directory.Exists(dir)) foreach (var f in Directory.GetFiles(dir, "*.bad")) File.Delete(f); } catch { }
             http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
             http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", SiteApi.UserAgent);
+            Task.Run(() => Trim());
         }
+
+        void Trim()
+        {
+            try
+            {
+                if (!Directory.Exists(dir)) return;
+                var sw = Stopwatch.StartNew();
+                // Метки .bad остались от сборок, где WebP не умели открывать; .tmp — от прерванных загрузок.
+                foreach (var f in Directory.GetFiles(dir, "*.bad")) File.Delete(f);
+                foreach (var f in Directory.GetFiles(dir, "*.tmp")) File.Delete(f);
+                var files = new List<FileInfo>();
+                long total = 0;
+                foreach (var f in new DirectoryInfo(dir).GetFiles()) { files.Add(f); total += f.Length; }
+                var before = total;
+                var removed = 0;
+                if (total > MaxBytes)
+                {
+                    files.Sort((a, b) => a.LastWriteTimeUtc.CompareTo(b.LastWriteTimeUtc));
+                    foreach (var f in files)
+                    {
+                        if (total <= TrimToBytes) break;
+                        try { f.Delete(); total -= f.Length; removed++; } catch { }
+                    }
+                }
+                DevLog.Write("image cache: " + files.Count + " файлов, " + (before >> 20) + " МБ" +
+                    (removed > 0 ? ", удалено " + removed + " → " + (total >> 20) + " МБ" : "") + ", " + sw.ElapsedMilliseconds + " мс");
+            }
+            catch (Exception e) { DevLog.Write("image cache trim: " + e.GetType().Name + " " + e.Message); }
+        }
+
+        // Показали картинку из кеша — отметить, что она нужна (не чаще раза в TouchEvery на файл).
+        static void Touch(string file) => Task.Run(() =>
+        {
+            try
+            {
+                var now = DateTime.UtcNow;
+                if (now - File.GetLastWriteTimeUtc(file) > TouchEvery) File.SetLastWriteTimeUtc(file, now);
+            }
+            catch { }
+        });
 
         // cacheKey — имя в кеше вместо адреса: для ссылок с меняющимся токеном (кадры серий CVH).
         public void Set(Image img, string url, string cacheKey = null)
@@ -44,7 +89,7 @@ namespace AnimeGo.Tv
             wanted[img] = url;
             var name = Path.Combine(dir, Sha1(cacheKey ?? url));
             var cached = Cached(name);
-            if (cached != null) { Apply(img, url, cached); return; }
+            if (cached != null) { Touch(cached); Apply(img, url, cached); return; }
             Load(url, name).ContinueWith(t =>
             {
                 var file = t.Status == TaskStatus.RanToCompletion ? t.Result : null;
@@ -58,6 +103,7 @@ namespace AnimeGo.Tv
             if (img == null) return false;
             var cached = Cached(Path.Combine(dir, Sha1(cacheKey)));
             if (cached == null) return false;
+            Touch(cached);
             wanted[img] = cacheKey;
             Apply(img, cacheKey, cached);
             return true;
@@ -103,6 +149,7 @@ namespace AnimeGo.Tv
             {
                 Directory.CreateDirectory(dir);
                 var bytes = await http.GetByteArrayAsync(url).ConfigureAwait(false);
+                if (Placeholders.Contains(Sha1(bytes))) { DevLog.Write("image: заглушка " + url); return null; }
                 var ext = Ext(bytes);
                 if (ext == ".webp") { bytes = WebpToPng(bytes); ext = ".png"; }
                 var file = name + ext;
@@ -207,11 +254,17 @@ namespace AnimeGo.Tv
             return null;
         }
 
-        static string Sha1(string url)
+        // Картинки-заглушки CDN, которые показывать нельзя: AniBoom вместо кадра серии отдаёт серое «IMAGE NOT FOUND»
+        // (hqdefault.webp, JPEG 320×180, 20 795 байт) — такой ответ считаем отсутствием кадра.
+        static readonly HashSet<string> Placeholders = new HashSet<string> { "0adabf35d51d9b788fe3fa4b367e442cc650ff3f" };
+
+        static string Sha1(string url) => Sha1(Encoding.UTF8.GetBytes(url));
+
+        static string Sha1(byte[] data)
         {
             using (var sha = SHA1.Create())
             {
-                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(url));
+                var hash = sha.ComputeHash(data);
                 var sb = new StringBuilder(hash.Length * 2);
                 foreach (var b in hash) sb.Append(b.ToString("x2"));
                 return sb.ToString();

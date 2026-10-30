@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using AnimeGo.Core;
 using ElmSharp;
@@ -30,11 +29,7 @@ namespace AnimeGo.Tv
             public PlayerInfo Info;      // null — ещё не загрузили
             public AnimeInfo Anime;      // страница тайтла сезона: график выхода серий; null — нет
             public bool Failed;
-            public Dictionary<int, string> Videos;   // серия → vkId CVH (для кадров); null — нет CVH
-            public string Aniboom;                   // AniBoom есть у сезона — кадры серий без CVH берём из него
-            public readonly HashSet<int> Unreleased = new HashSet<int>();   // у серии на сайте нет ни одного видео
-            public readonly HashSet<int> Asked = new HashSet<int>();        // кадр уже запрашивали (не повторять при перерисовке)
-            public bool VideosAsked;
+            public EpisodeThumbs Thumbs;   // кадры серий сезона; null — ещё не заводили
         }
 
         readonly App app;
@@ -48,7 +43,7 @@ namespace AnimeGo.Tv
         readonly List<EvasObject> side = new List<EvasObject>(), page = new List<EvasObject>(), tabs = new List<EvasObject>();
         readonly List<(Image Pic, Episode Ep, int X, int Y, bool Labeled)> pics = new List<(Image, Episode, int, int, bool)>();
         readonly UiTimer sideTimer = new UiTimer();
-        readonly SemaphoreSlim thumbSlots = new SemaphoreSlim(3);
+        readonly Skeleton skeleton;   // 12 плиток на месте страницы, пока ждём серии сезона
         Label sub, status;
         EvasObject frame;
         Area area = Area.Grid;
@@ -69,6 +64,8 @@ namespace AnimeGo.Tv
             this.startEpisode = startEpisode;
             ui = new Widgets(app.Win);
             ui.Rect(0, 0, Theme.W, Theme.H, Theme.Bg);
+            skeleton = new Skeleton(ui);
+            for (var i = 0; i < PerPage; i++) skeleton.Add(GridX + i % Cols * (TileW + Gap), GridY + i / Cols * Pitch, TileW, TileH, Radius);
         }
 
         public void Show()
@@ -103,6 +100,8 @@ namespace AnimeGo.Tv
             alive = false;
             generation++;
             sideTimer.Stop();
+            skeleton.Hide();
+            foreach (var s in seasons) s.Thumbs?.Stop();
             ui.Dispose();
         }
 
@@ -117,18 +116,20 @@ namespace AnimeGo.Tv
             ClearPage();
             UpdateSub();
             if (s.Info != null) { ShowSeason(want); return; }
-            SetStatus(RuText.Loading);
+            SetStatus(null);
+            skeleton.Show();
             Task.Run(async () =>
             {
                 PlayerInfo pi = null;
                 AnimeInfo page = s.Anime;
                 var pageTask = page != null ? Task.FromResult(page) : LoadPage(s);
-                try { pi = await app.Api.PlayerAsync(s.Season.AnimeId).ConfigureAwait(false); }
+                try { pi = await app.PlayerInfoAsync(s.Season.AnimeId).ConfigureAwait(false); }   // из кеша, если недавно был у плеера или тайтла
                 catch (Exception e) { DevLog.Write("episodes: сезон " + s.Season.AnimeId + " ошибка " + PlayerSources.Why(e)); }
                 page = await pageTask.ConfigureAwait(false);
                 App.Ui(() =>
                 {
                     if (!alive || n != generation) return;
+                    skeleton.Hide();
                     s.Anime = page;
                     s.Info = pi;
                     s.Failed = pi == null;
@@ -141,6 +142,7 @@ namespace AnimeGo.Tv
 
         void ShowSeason(int want)
         {
+            skeleton.Hide();
             var eps = Episodes;
             UpdateSub();
             BuildSide();   // теперь известно число серий
@@ -151,119 +153,43 @@ namespace AnimeGo.Tv
             focus = target;
             pageNo = focus / PerPage;
             BuildPage();
-            LoadVideos();
         }
 
         // Страница тайтла сезона — ради графика выхода; не вышло — без графика.
         async Task<AnimeInfo> LoadPage(SeasonItem s)
         {
-            try { return AnimeParser.Parse(await app.Api.GetHtmlAsync(s.Url).ConfigureAwait(false), s.Season.AnimeId); }
+            try { return await app.AnimeInfoAsync(s.Url, s.Season.AnimeId).ConfigureAwait(false); }
             catch (Exception) { return null; }
         }
 
         // Когда выйдет серия (null — вышла): график страницы тайтла или «нет видео» с сайта.
         (string When, string In)? Upcoming(SeasonItem s, int number) =>
-            Release.Of(s.Anime, number) ?? (s.Unreleased.Contains(number) ? ((string)null, (string)null) : ((string, string)?)null);
+            Release.Of(s.Anime, number) ?? (s.Thumbs != null && s.Thumbs.IsUnreleased(number) ? ((string)null, (string)null) : ((string, string)?)null);
 
         List<Episode> Episodes => seasons[season].Info?.Episodes.OrderBy(e => e.Number).ToList() ?? new List<Episode>();
 
-        // Кадры серий: titleId CVH из адреса источника любой серии → плейлист → vkId серий → thumbUrl каждой.
-        // Серии без CVH — источники самой серии: есть AniBoom — его poster, нет ни одного видео — «ещё не вышла».
-        void LoadVideos()
-        {
-            var s = seasons[season];
-            if (s.VideosAsked) { RequestThumbs(); return; }
-            s.VideosAsked = true;
-            var first = s.Info.Episodes.FirstOrDefault();
-            if (first == null) return;
-            var main = app.Prefs.Dub(app.UserKey, s.Season.AnimeId).Main ?? app.Prefs.Dub(app.UserKey, animeId).Main;
-            var n = generation;
-            Task.Run(async () =>
-            {
-                Dictionary<int, string> map = null;
-                string boom = null;
-                try
-                {
-                    var v = await app.Api.EpisodeVideosAsync(first.Id).ConfigureAwait(false);
-                    boom = v.Sources.Where(x => x.Provider == "aniboom").OrderBy(x => x.TranslationKey == main ? 0 : 1)
-                        .Select(x => x.PlayerUrl).FirstOrDefault(u => !string.IsNullOrEmpty(u));
-                    var cvh = v.Sources.Where(x => x.Provider == "cvh")
-                        .OrderBy(x => x.TranslationKey == main ? 0 : 1)
-                        .Select(x => Cvh.ParseIframeUrl(x.PlayerUrl)).FirstOrDefault(x => x != null);
-                    if (cvh != null)
-                    {
-                        var (titleId, voice, cvhSeason, _) = cvh.Value;
-                        map = Cvh.EpisodeVideos(await app.Api.CvhPlaylistAsync(titleId).ConfigureAwait(false), cvhSeason, voice);
-                    }
-                }
-                catch (Exception e) { DevLog.Write("episodes: кадры " + s.Season.AnimeId + " — " + PlayerSources.Why(e)); }
-                App.Ui(() =>
-                {
-                    s.Videos = map;
-                    s.Aniboom = boom;
-                    DevLog.Write("episodes: кадров CVH " + (map?.Count ?? 0) + (boom != null ? ", есть AniBoom" : ""));
-                    if (alive && n == generation) RequestThumbs();
-                });
-            });
-        }
-
-        // Кадры плиток текущей страницы: из кеша сразу, иначе узнаём адрес кадра (не больше 3 запросов одновременно).
+        // Кадры плиток текущей страницы: из кеша сразу, иначе EpisodeThumbs узнаёт адрес и зовёт OnThumb.
         void RequestThumbs()
         {
             var s = seasons[season];
-            if (!s.VideosAsked || (s.Videos == null && s.Aniboom == null)) return;
-            var n = generation;
-            var main = app.Prefs.Dub(app.UserKey, s.Season.AnimeId).Main ?? app.Prefs.Dub(app.UserKey, animeId).Main;
-            foreach (var t in pics)
+            if (s.Info == null) return;
+            if (s.Thumbs == null)
             {
-                var (pic, ep) = (t.Pic, t.Ep);
-                if (Upcoming(s, ep.Number) != null) continue;   // подписана при раскладке
-                if (s.Videos != null && s.Videos.TryGetValue(ep.Number, out var vk))
-                {
-                    var key = "cvh-thumb-" + vk;
-                    if (app.Images.TrySetCached(pic, key) || !s.Asked.Add(ep.Number)) continue;
-                    Fetch(n, () => app.Api.CvhThumbAsync(vk), thumb => SetThumb(ep.Number, thumb, key));
-                    continue;
-                }
-                var boomKey = "aniboom-thumb-" + s.Season.AnimeId + "-" + ep.Number;
-                if (app.Images.TrySetCached(pic, boomKey) || !s.Asked.Add(ep.Number)) continue;
-                Fetch(n, async () =>
-                {
-                    var v = await app.Api.EpisodeVideosAsync(ep.Id).ConfigureAwait(false);
-                    if (v.Sources.Count == 0) return "";   // «ещё не вышла»
-                    var boom = v.Sources.Where(x => x.Provider == "aniboom").OrderBy(x => x.TranslationKey == main ? 0 : 1)
-                        .Select(x => x.PlayerUrl).FirstOrDefault(u => !string.IsNullOrEmpty(u));
-                    return boom == null ? null : await app.Api.AniboomPosterAsync(boom).ConfigureAwait(false);
-                }, thumb =>
-                {
-                    if (thumb.Length > 0) { SetThumb(ep.Number, thumb, boomKey); return; }
-                    s.Unreleased.Add(ep.Number);
-                    BuildPage();   // перерисовать с подписью «ещё не вышла»
-                });
+                var main = app.Prefs.Dub(app.UserKey, s.Season.AnimeId).Main ?? app.Prefs.Dub(app.UserKey, animeId).Main;
+                s.Thumbs = new EpisodeThumbs(app, s.Season.AnimeId, main) { Changed = n => OnThumb(s, n) };
             }
+            foreach (var t in pics)
+                if (Upcoming(s, t.Ep.Number) == null) s.Thumbs.Set(t.Pic, t.Ep);   // не вышедшие подписаны при раскладке
         }
 
-        // Кадр — в плитку серии, которая на экране сейчас (страницу могли перерисовать, пока шёл запрос).
-        void SetThumb(int number, string thumb, string key)
+        // Кадр серии number узнали (0 — все): в плитку, если она на экране; «не вышла» — перерисовать с подписью.
+        void OnThumb(SeasonItem s, int number)
         {
-            foreach (var t in pics) if (t.Ep.Number == number) { app.Images.Set(t.Pic, thumb, key); return; }
-            seasons[season].Asked.Remove(number);   // перелистнули: спросим снова, когда страница вернётся
+            if (!alive || seasons[season] != s) return;
+            if (number == 0) { RequestThumbs(); return; }
+            if (s.Thumbs.IsUnreleased(number)) { BuildPage(); return; }
+            foreach (var t in pics) if (t.Ep.Number == number) { s.Thumbs.Set(t.Pic, t.Ep); return; }
         }
-
-        // Запрос адреса кадра в фоне (не больше 3 одновременно); null — кадра нет, ошибки глотаем.
-        void Fetch(int n, Func<Task<string>> find, Action<string> done)
-        {
-            Task.Run(async () =>
-            {
-                await thumbSlots.WaitAsync().ConfigureAwait(false);
-                string thumb = null;
-                try { if (n == generation) thumb = await find().ConfigureAwait(false); }
-                catch (Exception) { }
-                finally { thumbSlots.Release(); }
-                if (thumb != null) App.Ui(() => { if (alive && n == generation) done(thumb); });
-            });
-        }
-
 
         // ---- раскладка ----
 

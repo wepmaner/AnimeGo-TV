@@ -44,9 +44,35 @@ namespace AnimeGo.Tv
         }
         User user;
         bool userKnown;
+        // false — куки есть, но сайт ещё не сказал, кто мы (до первого ответа главной); шапка тогда не пишет «Войти».
+        public bool UserKnown => userKnown;
         public string PendingToast;   // сообщение для следующего экрана главной (показывает он)
         public ImageCache Images;
+        // Разобранные ответы сайта: экран, на который вернулись, рисуется из кеша без «Загрузки» (спека 2026-10-30).
+        public readonly DataCache Cache = new DataCache();
         public string UserKey => User?.Id.ToString() ?? "guest";
+
+        // Сессия сменилась (вход, выход, куки протухли): «Продолжить», «Мой список» и отметки — другого пользователя.
+        public void ForgetUserData() => Cache.Clear();
+
+        // Общие запросы с кешем: свежее freshSec секунд — из памяти, иначе с сайта (и в кеш). Ошибки — наружу, как у Api.
+        // Объекты общие: Episode.Watched, выставленный плеером, виден и странице тайтла, и экрану серий.
+        public Task<PlayerInfo> PlayerInfoAsync(int animeId, int freshSec = 120) =>
+            CachedAsync("player:" + animeId, freshSec, () => Api.PlayerAsync(animeId));
+
+        public Task<AnimeInfo> AnimeInfoAsync(string url, int animeId, int freshSec = 600) =>
+            CachedAsync("title:" + url, freshSec, async () => AnimeParser.Parse(await Api.GetHtmlAsync(url).ConfigureAwait(false), animeId));
+
+        public Task<EpisodeVideos> EpisodeVideosAsync(int episodeId, int freshSec = 300) =>
+            CachedAsync("videos:" + episodeId, freshSec, () => Api.EpisodeVideosAsync(episodeId));
+
+        public async Task<T> CachedAsync<T>(string key, int freshSec, Func<Task<T>> fetch) where T : class
+        {
+            if (Cache.TryGet(key, out T hit, out var age) && age < freshSec) return hit;
+            var fresh = await fetch().ConfigureAwait(false);
+            Cache.Put(key, fresh);
+            return fresh;
+        }
         IScreen screen;
         // «Назад»: как пересоздать экраны, с которых пришли (сверху — последний). Экраны не храним живыми — их виджеты
         // освобождает Hide, поэтому возвращаемся на свежий экран с теми же параметрами.
@@ -75,53 +101,23 @@ namespace AnimeGo.Tv
             StartSession();
         }
 
-        // Куки есть — спросить сайт, кто мы; нет — экран входа (если не отказывались) или гостем.
+        // Куки есть — сразу главная со скелетоном: её ответ «/» и скажет, кто мы (раньше тот же запрос ходил дважды:
+        // whoami под «Загрузкой…», потом главная). Нет — экран входа (если не отказывались) или гостем.
         void StartSession()
         {
-            if (string.IsNullOrEmpty(Prefs.Cookies))
-            {
-                User = null;   // гость: Stash узнаёт об этом из /hello
-                if (Prefs.SkippedLogin) ShowHome(); else Navigate(new LoginScreen(this));
-                return;
-            }
-            var wait = new MessageView(this, RuText.Loading);
-            Navigate(wait);
-            Task.Run(async () =>
-            {
-                User user = null;
-                string failure = null;
-                var logout = false;
-                try
-                {
-                    user = await Api.WhoAmIAsync().ConfigureAwait(false);
-                    logout = user == null;
-                }
-                catch (ApiException e)
-                {
-                    DevLog.Write("whoami: " + e.Kind);
-                    if (e.Kind == ApiErrorKind.Unauthorized) logout = true; else failure = RuText.NoConnection;
-                }
-                catch (Exception e)
-                {
-                    DevLog.Write("whoami: " + e.GetType().Name);
-                    failure = RuText.NoConnection;
-                }
-                Ui(() =>
-                {
-                    if (screen != wait) return;   // пока ждали, экран сменился
-                    if (user != null) DevLog.Write("whoami: ok " + user.Id);
-                    if (logout)
-                    {
-                        DevLog.Write("whoami: сессия недействительна, куки сброшены");
-                        Prefs.Cookies = null;
-                        SavePrefs();
-                        var _ = Api.LogoutAsync();
-                    }
-                    User = user;
-                    PendingToast = failure;
-                    ShowHome();
-                });
-            });
+            if (string.IsNullOrEmpty(Prefs.Cookies)) User = null;   // гость: Stash узнаёт об этом из /hello
+            if (!string.IsNullOrEmpty(Prefs.Cookies) || Prefs.SkippedLogin) ShowHome(); else Navigate(new LoginScreen(this));
+        }
+
+        // Сайт не узнал нашу сессию (401/403 или в ответе нет пользователя): куки сброшены, дальше гостем.
+        public void SessionExpired()
+        {
+            DevLog.Write("session: недействительна, куки сброшены");
+            Prefs.Cookies = null;
+            SavePrefs();
+            var _ = Api.LogoutAsync();
+            User = null;
+            ForgetUserData();
         }
 
         public void ShowHome()

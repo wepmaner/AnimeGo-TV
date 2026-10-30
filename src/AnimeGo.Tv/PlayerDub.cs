@@ -160,7 +160,7 @@ namespace AnimeGo.Tv
             Task.Run(async () =>
             {
                 EpisodeVideos v = null;
-                try { v = await app.Api.EpisodeVideosAsync(ep.Id).ConfigureAwait(false); }
+                try { v = await app.EpisodeVideosAsync(ep.Id).ConfigureAwait(false); }
                 catch (Exception e) { DevLog.Write("end: серия " + next + " ошибка " + Why(e)); }
                 App.Ui(() =>
                 {

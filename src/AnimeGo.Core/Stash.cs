@@ -8,7 +8,7 @@ namespace AnimeGo.Core
     public static class AppInfo
     {
         public const string Package = "ru.animego.tv";
-        public const string Version = "1.0.5";   // = version в tizen-manifest.xml (проверяет тест; меняет scripts/release.sh)
+        public const string Version = "1.0.6";   // = version в tizen-manifest.xml (проверяет тест; меняет scripts/release.sh)
     }
 
     // Ответ REST-API телевизора http://<tv>:8001/api/v2/ — нужное из него.

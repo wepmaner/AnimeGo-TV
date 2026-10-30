@@ -15,6 +15,7 @@ namespace AnimeGo.Tv
         public bool Loading, Failed;
         public int Focus = -1;      // −1 — ещё не ставили
         public int First;           // первая видимая плитка
+        public EpisodeThumbs Thumbs;   // кадры серий для плиток
     }
 
     // Сезоны тайтла для панели плеера: страница тайтла → «Связанное» → Seasons.Build. Страницу не разобрали —
@@ -43,7 +44,11 @@ namespace AnimeGo.Tv
 
         public SeasonRow Current => List.FirstOrDefault(r => r.Season.AnimeId == animeId);
 
-        public void Stop() => alive = false;
+        public void Stop()
+        {
+            alive = false;
+            foreach (var r in List) r.Thumbs?.Stop();
+        }
 
         public void SetInfo(PlayerInfo pi)
         {
@@ -57,7 +62,7 @@ namespace AnimeGo.Tv
             Task.Run(async () =>
             {
                 AnimeInfo a = null;
-                try { a = AnimeParser.Parse(await app.Api.GetHtmlAsync(url).ConfigureAwait(false), animeId); }
+                try { a = await app.AnimeInfoAsync(url, animeId).ConfigureAwait(false); }   // страница тайтла обычно уже в кеше
                 catch (Exception e) { DevLog.Write("player: страница тайтла " + animeId + " ошибка " + PlayerSources.Why(e)); }
                 App.Ui(() =>
                 {
@@ -77,12 +82,19 @@ namespace AnimeGo.Tv
             var seasons = a != null ? Seasons.Build(a) : new[] { new Season { AnimeId = animeId, Title = "", Order = 1, IsCurrent = true } };
             var urls = new Dictionary<int, string>();
             foreach (var r in a?.Related ?? new RelatedTitle[0]) urls[r.Id] = "/anime/" + r.Slug + "-" + r.Id;
-            return seasons.OrderBy(s => s.IsCurrent ? 0 : 1).Select(s => new SeasonRow
+            var rows = seasons.OrderBy(s => s.IsCurrent ? 0 : 1).Select(s => new SeasonRow
             {
                 Season = s,
                 Url = s.IsCurrent ? url : urls.TryGetValue(s.AnimeId, out var u) ? u : null,
                 Info = s.IsCurrent ? info : null,
             }).Where(r => r.Url != null).ToList();
+            foreach (var r in rows)
+            {
+                var row = r;
+                var main = app.Prefs.Dub(app.UserKey, r.Season.AnimeId).Main ?? app.Prefs.Dub(app.UserKey, animeId).Main;
+                r.Thumbs = new EpisodeThumbs(app, r.Season.AnimeId, main) { Changed = n => panel.ThumbChanged(row, n) };
+            }
+            return rows;
         }
 
         void LoadRow(SeasonRow r)
@@ -92,7 +104,7 @@ namespace AnimeGo.Tv
             Task.Run(async () =>
             {
                 PlayerInfo pi = null;
-                try { pi = await app.Api.PlayerAsync(r.Season.AnimeId).ConfigureAwait(false); }
+                try { pi = await app.PlayerInfoAsync(r.Season.AnimeId).ConfigureAwait(false); }
                 catch (Exception e) { DevLog.Write("player: сезон " + r.Season.AnimeId + " ошибка " + PlayerSources.Why(e)); }
                 App.Ui(() =>
                 {

@@ -68,11 +68,28 @@ namespace AnimeGo.Tv
                 (hint == null ? "" : "<font_size=22 color=" + DimHex + "> " + Theme.Escape(hint) + "</font_size>") + "</align>";
 
         // Фокус и сдвиг сохраняются (в пределах нового числа карточек). После вызова экран делает Place.
+        // Те же карточки (по тексту, картинке, прогрессу и метке) — виджеты не трогаем, только подменяем данные:
+        // так фоновое обновление главной из кеша не мигает и не перечитывает картинки.
         public void SetItems(IReadOnlyList<RowItem> list)
         {
             items = list ?? new RowItem[0];
             Focus = Math.Max(0, Math.Min(Focus, items.Count - 1));
+            var sig = Signature(items);
+            if (sig == signature) return;
+            signature = sig;
             Build();
+        }
+
+        string signature;
+
+        static string Signature(IReadOnlyList<RowItem> list)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var it in list)
+                sb.Append(it.Title).Append('\u0001').Append(it.Subtitle).Append('\u0001').Append(it.ImageUrl).Append('\u0001')
+                    .Append(it.Progress.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)).Append('\u0001')
+                    .Append(it.Badge).Append('\u0001').Append(it.TimeLabel).Append('\u0002');
+            return sb.ToString();
         }
 
         // Дорисовать метку карточке index (item.Badge уже задан): только её, без пересоздания карточек и картинок.

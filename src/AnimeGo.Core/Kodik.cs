@@ -23,6 +23,21 @@ namespace AnimeGo.Core
         static readonly Regex PlayerJsRx = new Regex(@"src=""(/assets/js/app\.player_single[^""]*\.js)""", Opts);
 
         public const string DefaultEndpoint = "/ftor";
+        static readonly Regex ThumbsRx = new Regex(@"var\s+thumbnails\s*=\s*\[(.*?)\]", Opts);
+        static readonly Regex QuotedRx = new Regex(@"""([^""]+)""", Opts);
+
+        // Кадр серии: на странице плеера `var thumbnails = [...]` — несколько кадров из серии в случайном порядке.
+        // Берём средний по имени файла (thumb001…thumb005 — по времени), с https:. null — нет.
+        public static string ParseThumbnail(string html)
+        {
+            var m = ThumbsRx.Match(html ?? "");
+            if (!m.Success) return null;
+            var urls = QuotedRx.Matches(m.Groups[1].Value).Cast<Match>().Select(x => x.Groups[1].Value)
+                .Where(u => u.Length > 0).OrderBy(u => u.Substring(u.LastIndexOf('/') + 1), StringComparer.Ordinal).ToList();
+            if (urls.Count == 0) return null;
+            var u = urls[urls.Count / 2];
+            return u.StartsWith("//", StringComparison.Ordinal) ? "https:" + u : u;
+        }
 
         public static (string type, string id, string hash)? ParseEmbed(string playerUrl)
         {

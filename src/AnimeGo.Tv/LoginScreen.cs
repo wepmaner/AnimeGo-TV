@@ -338,6 +338,7 @@ namespace AnimeGo.Tv
             if (!alive) { r?.TrySetResult((null, RuText.StashLoginClosed)); return; }
             if (user != null)
             {
+                app.ForgetUserData();   // главная и «Мой список» в кеше — гостя или прежнего пользователя
                 app.User = user;
                 app.Prefs.Cookies = app.Jar.Export();
                 app.Prefs.SkippedLogin = false;

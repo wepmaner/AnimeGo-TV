@@ -22,20 +22,25 @@ namespace AnimeGo.Tv
         const int VisibleTiles = 8, VisibleRows = 2;
         static readonly Color PanelBg = Color.FromRgba(11, 12, 16, 235), GapBg = Color.FromHex("#0b0c10"), TopBg = Color.FromRgba(0, 0, 0, 140);
         static readonly Color Track = Color.FromHex("#404144"), PlayingBg = Color.FromHex("#663138"), BtnBg = Color.FromHex("#2f3034"), WatchedBg = Color.FromHex("#181a20");
+        static readonly Color Shade = Color.FromRgba(0, 0, 0, 170), Dim = Color.FromRgba(11, 12, 16, 150);   // плашка номера на кадре; затемнение просмотренных
         const string SubHex = "#c9cdd4", DimHex = "#9aa0ab", TileHex = "#d5d8de", GreenHex = "#4ade80", DarkHex = "#0e0f13";
 
         readonly Widgets ui;
         readonly List<EvasObject> band = new List<EvasObject>();   // всё, кроме рядов и колец фокуса
         readonly List<EvasObject> rowParts = new List<EvasObject>();
+        readonly Dictionary<(int Anime, int Number), (Image Pic, Episode Ep)> tilePics = new Dictionary<(int, int), (Image, Episode)>();   // плитки на экране
+        readonly Dictionary<SeasonRow, (EvasObject Frame, int Ty)> rowFrames = new Dictionary<SeasonRow, (EvasObject, int)>();   // рамка фокуса каждого построенного ряда
         readonly Rectangle bg, fill;
         readonly Polygon track, knob, knobRing, btnRing, btnGap;
         readonly Label title, sub, posText, leftText;
         readonly Polygon[] btnBack = new Polygon[5];
         readonly Label[] btnText = new Label[5];
+        readonly Polygon playIcon, pauseL, pauseR;   // значки кнопки паузы: глифов ▶/❚❚ в шрифте ТВ может не быть
         readonly int[] btnX = new int[5], btnW = new int[5];
         readonly string[] btnLabel = new string[5];
         IReadOnlyList<SeasonRow> rows = new SeasonRow[0];
         int curAnime, curNumber, pos, dur, rowTop;
+        bool paused;
         bool skip = true;   // «Пропустить опенинг» — только в начале серии (решает экран)
 
         public Mode State { get; private set; } = Mode.Hidden;
@@ -74,6 +79,9 @@ namespace AnimeGo.Tv
                 btnBack[i] = Add(ui.RoundRect(0, 0, 10, BtnH, BtnH / 2, BtnBg, false));
                 btnText[i] = Add(ui.Text(0, 0, 10, 36, "", false));
             }
+            playIcon = Add(ui.RoundRect(0, 0, 10, 10, 0, Theme.Focus, false));   // форму задаёт Layout (треугольник)
+            pauseL = Add(ui.RoundRect(0, 0, 9, 30, 3, Theme.Focus, false));
+            pauseR = Add(ui.RoundRect(0, 0, 9, 30, 3, Theme.Focus, false));
             SetButtons(false, "—", "—");
         }
 
@@ -89,7 +97,8 @@ namespace AnimeGo.Tv
 
         public void SetButtons(bool paused, string dub, string quality)
         {
-            btnLabel[Pause] = paused ? RuText.Play : RuText.PauseLabel;   // текстом: глифов ▶/❚❚ в шрифте ТВ может не быть
+            this.paused = paused;
+            btnLabel[Pause] = "";   // круглая кнопка со значком ▶ или ❚❚ (полигоны, см. Layout)
             btnLabel[Dub] = RuText.Dub + ": " + dub + "  ›";
             btnLabel[Quality] = RuText.Quality + ": " + quality;
             btnLabel[Next] = RuText.NextEpisode;
@@ -98,7 +107,7 @@ namespace AnimeGo.Tv
             for (var i = 0; i < 5; i++)
             {
                 btnX[i] = x;
-                btnW[i] = 60 + 12 * Math.Max(btnLabel[i].Length, 6);
+                btnW[i] = i == Pause ? BtnH : 60 + 12 * Math.Max(btnLabel[i].Length, 6);
                 x += btnW[i] + BtnGap;
             }
             Layout();
@@ -191,18 +200,29 @@ namespace AnimeGo.Tv
                 btnText[i].Move(btnX[i], BtnY + 19);
                 btnText[i].Resize(btnW[i], 36);
             }
+            // Значки в центре круглой кнопки: треугольник чуть правее центра (оптически), две полоски 9×30.
+            int cx = btnX[Pause] + BtnH / 2, cy = BtnY + BtnH / 2;
+            playIcon.ClearPoints();
+            playIcon.AddPoint(cx - 11, cy - 16);
+            playIcon.AddPoint(cx + 17, cy);
+            playIcon.AddPoint(cx - 11, cy + 16);
+            Widgets.Shape(pauseL, cx - 13, cy - 15, 9, 30, 3);
+            Widgets.Shape(pauseR, cx + 4, cy - 15, 9, 30, 3);
             SetPosition(pos, dur);
             UpdateButtons();
         }
 
         // ---- фокус ----
 
-        public void Up()
+        // ↑: ряды → кнопки → полоса. false — выше некуда (фокус уже на полосе): экран закрывает панель, остаётся чистое видео.
+        public bool Up()
         {
-            if (Focus == Zone.Rows && Row > 0) { Row--; BuildRows(); return; }
+            if (Focus == Zone.Bar) return false;
+            if (Focus == Zone.Rows && Row > 0) { Row--; if (!RefreshFocus()) BuildRows(); return true; }
             Focus = Focus == Zone.Rows ? Zone.Buttons : Zone.Bar;
-            BuildRows();
+            RefreshFocus();
             UpdateButtons();
+            return true;
         }
 
         // ↓ из кнопок раскрывает Full и ставит фокус в ряды.
@@ -210,7 +230,7 @@ namespace AnimeGo.Tv
         {
             if (Focus == Zone.Bar) { Focus = Zone.Buttons; UpdateButtons(); return; }
             if (Focus == Zone.Buttons) { if (rows.Count > 0) Show(Mode.Full, Zone.Rows); return; }
-            if (Row < rows.Count - 1) { Row++; BuildRows(); }
+            if (Row < rows.Count - 1) { Row++; if (!RefreshFocus()) BuildRows(); }
         }
 
         // ←→ на кнопках и в рядах (полосу перематывает экран).
@@ -222,7 +242,24 @@ namespace AnimeGo.Tv
             var n = r.Info?.Episodes.Count ?? 0;
             if (n == 0) return;
             r.Focus = Math.Max(0, Math.Min(n - 1, r.Focus + dx));
+            // Плитки не перестраиваем, пока окно видимых не сдвинулось: иначе кадры перечитываются и моргают.
+            var first = r.First;
+            if (r.Focus < first) first = r.Focus;
+            if (r.Focus >= first + VisibleTiles) first = r.Focus - VisibleTiles + 1;
+            if (first == r.First && rowFrames.TryGetValue(r, out var f))
+            {
+                ui.MoveFocus(f.Frame, M + (r.Focus - r.First) * (TileW + TileGap), f.Ty, TileW, TileH);
+                return;
+            }
             BuildRows();
+        }
+
+        // Рамки фокуса рядов без перестройки плиток: видна только у ряда в фокусе. false — этого ряда на экране нет.
+        bool RefreshFocus()
+        {
+            if (State != Mode.Full || rows.Count == 0) return true;
+            foreach (var kv in rowFrames) ui.ShowFocus(kv.Value.Frame, Focus == Zone.Rows && rows[Row] == kv.Key);
+            return Focus != Zone.Rows || rowFrames.ContainsKey(rows[Row]);
         }
 
         // Серия под фокусом в рядах; null — ряд ещё пуст.
@@ -244,6 +281,12 @@ namespace AnimeGo.Tv
             }
             if (Visible && skip) { btnBack[Skip].Show(); btnText[Skip].Show(); }
             else { btnBack[Skip].Hide(); btnText[Skip].Hide(); }
+            // Значок паузы — цветом текста кнопки; на паузе показываем ▶ («играть»), иначе ❚❚.
+            var pauseOn = Visible && Focus == Zone.Buttons && Button == Pause;
+            playIcon.Color = pauseL.Color = pauseR.Color = pauseOn ? Color.FromHex(DarkHex) : Theme.Focus;
+            if (Visible && paused) { playIcon.Show(); pauseL.Hide(); pauseR.Hide(); }
+            else if (Visible) { playIcon.Hide(); pauseL.Show(); pauseR.Show(); }
+            else { playIcon.Hide(); pauseL.Hide(); pauseR.Hide(); }
             if (Visible && Focus == Zone.Buttons)
             {
                 int x = btnX[Button], w = btnW[Button], y = BtnY;
@@ -252,6 +295,7 @@ namespace AnimeGo.Tv
                 btnRing.Show(); btnGap.Show();
                 btnRing.RaiseTop(); btnGap.RaiseTop();
                 btnBack[Button].RaiseTop(); btnText[Button].RaiseTop();
+                if (Button == Pause) { playIcon.RaiseTop(); pauseL.RaiseTop(); pauseR.RaiseTop(); }
             }
             else { btnRing.Hide(); btnGap.Hide(); }
             if (Visible && Focus == Zone.Bar)
@@ -269,6 +313,21 @@ namespace AnimeGo.Tv
         {
             foreach (var o in rowParts) ui.Remove(o);
             rowParts.Clear();
+            tilePics.Clear();
+            rowFrames.Clear();
+        }
+
+        // Кадр серии number ряда r узнали (0 — карта кадров пришла): в плитку, если она на экране; «не вышла» — перерисовать.
+        public void ThumbChanged(SeasonRow r, int number)
+        {
+            if (State != Mode.Full) return;
+            if (r.Thumbs.IsUnreleased(number)) { BuildRows(); return; }
+            if (number == 0)   // карта пришла: кадры в плитки этого ряда, остальное не трогаем (иначе кадры соседнего ряда моргнут)
+            {
+                foreach (var kv in tilePics) if (kv.Key.Anime == r.Season.AnimeId) r.Thumbs.Set(kv.Value.Pic, kv.Value.Ep);
+                return;
+            }
+            if (tilePics.TryGetValue((r.Season.AnimeId, number), out var t)) r.Thumbs.Set(t.Pic, t.Ep);
         }
 
         // Под блоком кнопок видны два ряда; фокусный — всегда среди них. Плитки строятся только видимые (у длинных сериалов их сотни).
@@ -312,12 +371,13 @@ namespace AnimeGo.Tv
             var ty = y + TileY;
             var frame = ui.RoundFocus(0, ty, TileW, TileH, 10, GapBg);   // раньше плиток — чтобы лежала под ними
             rowParts.Add(frame);
+            rowFrames[r] = (frame, ty);
             for (var i = r.First; i < Math.Min(eps.Count, r.First + VisibleTiles); i++)
             {
                 var x = M + (i - r.First) * (TileW + TileGap);
                 var e = eps[i];
                 var playing = current && e.Number == curNumber;
-                var upcoming = playing ? null : Upcoming?.Invoke(r, e.Number);
+                var upcoming = playing ? null : Upcoming?.Invoke(r, e.Number) ?? (r.Thumbs != null && r.Thumbs.IsUnreleased(e.Number) ? ((string)null, (string)null) : ((string, string)?)null);
                 // Текущая — красная рамка 3 px и красноватая подложка: не путать с белой рамкой фокуса.
                 if (playing) rowParts.Add(ui.RoundRect(x - 3, ty - 3, TileW + 6, TileH + 6, 13, Theme.Accent));
                 rowParts.Add(ui.RoundRect(x, ty, TileW, TileH, 10, playing ? PlayingBg : e.Watched || upcoming != null ? WatchedBg : Theme.Card2));
@@ -330,16 +390,26 @@ namespace AnimeGo.Tv
                         Theme.T(string.IsNullOrEmpty(upcoming.Value.When) ? RuText.NotReleased : upcoming.Value.When, 17, DimHex, align: "center"));
                     when.IsEllipsis = true;
                     rowParts.Add(when);
-                    if (active && i == r.Focus) ui.MoveFocus(frame, x, ty, TileW, TileH);
+                    if (i == r.Focus) ui.MoveFocus(frame, x, ty, TileW, TileH);
                     continue;
                 }
-                var label = playing ? Theme.T(n + " · " + RuText.NowWatching, 20, "#ffffff", true, "center")
-                    : e.Watched ? "<align=center><font_size=22 color=" + DimHex + " font_weight=Bold>" + n + "  <color=" + GreenHex + ">✓</color></font_size></align>"
-                    : Theme.T(n, 22, TileHex, true, "center");
-                rowParts.Add(ui.Text(x, ty + (TileH - 32) / 2, TileW, 34, label));
+                // Кадр серии (EpisodeThumbs ставит из кеша или когда узнает адрес), просмотренные затемнены,
+                // номер — в плашке слева снизу, как на экране серий.
+                var pic = ui.Picture(x, ty, TileW, TileH);
+                rowParts.Add(pic);
+                tilePics[(r.Season.AnimeId, e.Number)] = (pic, e);
+                r.Thumbs?.Set(pic, e);
+                if (e.Watched && !playing) rowParts.Add(ui.Rect(x, ty, TileW, TileH, Dim));
+                var text = playing ? n + " · " + RuText.NowWatching : n;
+                var tw = 16 + 11 * text.Length + (e.Watched && !playing ? 24 : 0);
+                var label = playing ? Theme.T(text, 18, "#ffffff", true, "center")
+                    : e.Watched ? "<align=center><font_size=18 color=" + TileHex + " font_weight=Bold>" + n + " <color=" + GreenHex + ">✓</color></font_size></align>"
+                    : Theme.T(n, 18, TileHex, true, "center");
+                rowParts.Add(ui.RoundRect(x + 8, ty + TileH - 8 - 30, tw, 30, 8, Shade));
+                rowParts.Add(ui.Text(x + 8, ty + TileH - 8 - 30 + 3, tw, 26, label));
                 if (playing && dur > 0)
                     rowParts.Add(ui.Rect(x, ty + TileH - 5, Math.Max(1, (int)((long)TileW * Math.Min(pos, dur) / dur)), 5, Theme.Focus));   // на красной подложке полоса белая
-                if (active && i == r.Focus) ui.MoveFocus(frame, x, ty, TileW, TileH);
+                if (i == r.Focus) ui.MoveFocus(frame, x, ty, TileW, TileH);
             }
             ui.ShowFocus(frame, active);
         }

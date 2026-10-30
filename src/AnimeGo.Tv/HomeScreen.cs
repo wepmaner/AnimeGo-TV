@@ -9,11 +9,15 @@ namespace AnimeGo.Tv
     // Главная (спека §5.2, макет Main.dc.html): шапка и ряды «Продолжить просмотр», «Давно не смотрели», «Жанры»,
     // «Новые серии · сезон», «Онгоинги», «ТОП-250». Пустые ряды не показываются, гость видит ряды с третьего.
     // ↑↓ — между шапкой и рядами, ←→ — внутри, фокус в каждом ряду свой. «Назад» — выход из приложения.
+    // Данные — из App.Cache, если уже были (вернулись по «Назад»): рисуем сразу и перепроверяем сайт в фоне
+    // (позиция просмотра меняется после плеера); впервые — скелетон до ответа.
     sealed class HomeScreen : IScreen
     {
         const int SectionGap = 40, ContentBottom = Theme.H - 40;
         const int MaxBadgeChecks = 3;   // запросов /player за загрузку ради метки «Новая серия»
         const string TopUrl = "/anime/top-250", TopTitle = "ТОП-250";
+        const string HomeKey = "home", OngoingKey = "home:ongoing", TopKey = "home:top";
+        const int ExtrasFreshSec = 600;   // «Онгоинги» и «ТОП-250» из кеша без перепроверки
         // Ряд «Жанры»: жанры каталога (без «Все аниме») и ТОП-250 в конце.
         static readonly string[] GenreRow = { "Экшен", "Комедия", "Романтика", "Фэнтези", "Приключения", "Сёнен", "Ужасы", "Детектив" };
 
@@ -22,12 +26,14 @@ namespace AnimeGo.Tv
         readonly HomeHeader header;
         readonly Row cont, stale, genres, season, ongoing, top;
         readonly Row[] rows;
+        readonly Skeleton skeleton;
         readonly Dictionary<int, int> newEpisode = new Dictionary<int, int>();   // animeId → номер вышедшей серии
-        MessageView overlay;   // «Загрузка…» / «Нет связи» поверх экрана до первой удачной загрузки
+        MessageView overlay;   // «Нет связи» поверх экрана, если данных нет совсем
         LogoutPopup popup;
+        string headerName;     // чьё имя сейчас в шапке (чтобы не перестраивать её без нужды)
         int focusRow = -1;     // −1 — шапка
         int scrollY, generation;
-        bool alive, extrasStarted;
+        bool alive, extrasStarted, rendered, headerPending, retriedExpired;
 
         public HomeScreen(App app)
         {
@@ -41,7 +47,34 @@ namespace AnimeGo.Tv
             ongoing = new Row(ui, app.Images, 0, 200, 280, 32, RuText.Ongoing) { OnOk = OpenTitle };
             top = new Row(ui, app.Images, 0, 200, 280, 32, RuText.Top) { OnOk = OpenTitle };
             rows = new[] { cont, stale, genres, season, ongoing, top };
-            header = new HomeHeader(ui, app.User?.Name);
+            skeleton = BuildSkeleton(app.User != null || !app.UserKnown);
+            headerPending = !app.UserKnown;
+            headerName = app.User?.Name;
+            header = new HomeHeader(ui, headerName, headerPending);
+        }
+
+        // Пока ждём сайт: у вошедшего (или пока неизвестно) — ряд широких кадров «Продолжить», ниже постеры;
+        // у гостя — «таблетки» жанров и постеры. Рисуется под шапкой, как настоящие ряды.
+        Skeleton BuildSkeleton(bool loggedIn)
+        {
+            var s = new Skeleton(ui);
+            var y = HomeHeader.Bottom;
+            if (loggedIn)
+            {
+                s.Line(Theme.Margin, y + 6, 360, 30);
+                for (var i = 0; i < 4; i++) s.Add(Theme.Margin + i * (480 + 32), y + Row.HeadH, 480, 270, 14);
+                y += cont.Height + SectionGap;
+            }
+            else
+            {
+                s.Line(Theme.Margin, y + 6, 160, 30);
+                var x = Theme.Margin;
+                foreach (var w in new[] { 140, 160, 170, 160, 190, 130, 130, 160 }) { s.Add(x, y + Row.HeadH, w, 64, 14); x += w + 16; }
+                y += genres.Height + SectionGap;
+            }
+            s.Line(Theme.Margin, y + 6, 420, 30);
+            for (var i = 0; i < 8; i++) s.Add(Theme.Margin + i * (200 + 32), y + Row.HeadH, 200, 280, 10);
+            return s;
         }
 
         public void Show()
@@ -54,6 +87,7 @@ namespace AnimeGo.Tv
         public void Hide()
         {
             alive = false;
+            skeleton.Hide();
             overlay?.Hide();
             overlay = null;
             ui.Dispose();
@@ -77,31 +111,53 @@ namespace AnimeGo.Tv
 
         // ---- данные ----
 
-        // Главная страница сайта. До первой удачной загрузки поверх экрана сообщение.
+        // Главная страница сайта. Есть в кеше — рисуем сразу, иначе скелетон; в любом случае запрашиваем заново
+        // (после плеера позиция и порядок «Продолжить» другие). Ошибка при показанном кеше — только в лог.
         void Load()
         {
             var n = ++generation;
-            ShowOverlay(new MessageView(app, RuText.Loading, null, app.Exit));   // «Назад» — выход и во время загрузки
+            var hit = app.Cache.TryGet(HomeKey, out HomePage cached, out _);
+            if (hit) Render(cached, false); else skeleton.Show();
             Task.Run(async () =>
             {
                 HomePage home = null;
                 string why = null;
+                var expired = false;
                 try { home = HomeParser.Parse(await app.Api.GetHtmlAsync("/").ConfigureAwait(false)); }
+                catch (ApiException e) when (e.Kind == ApiErrorKind.Unauthorized) { expired = true; }
                 catch (Exception e) { why = e is ApiException a ? a.Kind + " " + a.Message : e.GetType().Name + " " + e.Message; }
                 App.Ui(() =>
                 {
                     if (!alive || n != generation) return;
-                    if (home != null) { Render(home); return; }
-                    DevLog.Write("home: ошибка " + why);
+                    if (expired && !retriedExpired)
+                    {
+                        retriedExpired = true;
+                        app.SessionExpired();
+                        Load();   // ещё раз, уже гостем
+                        return;
+                    }
+                    if (home != null)
+                    {
+                        Render(home, true);
+                        app.Cache.Put(HomeKey, home);   // после Render: SessionExpired внутри него чистит кеш
+                        return;
+                    }
+                    DevLog.Write("home: ошибка " + (expired ? "Unauthorized" : why));
+                    if (hit) return;   // на экране кеш — достаточно
+                    skeleton.Hide();
                     ShowOverlay(new MessageView(app, RuText.NoConnection, Load, app.Exit));   // Split не зовём: данных нет
                 });
             });
         }
 
-        void Render(HomePage home)
+        // fresh — ответ сайта только что; false — из кеша (куки и сессию не трогаем).
+        void Render(HomePage home, bool fresh)
         {
+            skeleton.Hide();
             ShowOverlay(null);
-            app.User = home.User;   // сайт знает лучше: сессия могла кончиться или whoami не дошёл
+            // Сайт знает лучше: куки есть, а пользователя в ответе нет — сессия кончилась.
+            if (fresh && home.User == null && !string.IsNullOrEmpty(app.Prefs.Cookies)) app.SessionExpired();
+            else app.User = home.User;
             IReadOnlyList<ContinueCard> active = new ContinueCard[0], old = new ContinueCard[0];
             if (app.User != null)
             {
@@ -114,10 +170,18 @@ namespace AnimeGo.Tv
                     old = split.Stale;
                 }
                 else DevLog.Write("home: continue empty, seen untouched");
-                app.Prefs.Cookies = app.Jar.Export();   // сайт мог обновить куки сессии
-                app.SavePrefs();
+                if (fresh)
+                {
+                    app.Prefs.Cookies = app.Jar.Export();   // сайт мог обновить куки сессии
+                    app.SavePrefs();
+                }
             }
-            header.Build(app.User?.Name);
+            if (headerPending || headerName != app.User?.Name)
+            {
+                headerPending = false;
+                headerName = app.User?.Name;
+                header.Build(headerName);
+            }
             cont.SetItems(active.Select(ContinueItem).ToList());
             stale.SetItems(old.Select(c => new RowItem { Title = c.Title, Subtitle = RuText.Episode(c.EpisodeNumber), ImageUrl = c.FrameUrl, Tag = c }).ToList());
             genres.SetItems(GenreRow.Select(t => new RowItem { Title = t, Tag = Array.FindIndex(Genres.All, g => g.Title == t) })
@@ -125,22 +189,26 @@ namespace AnimeGo.Tv
             var when = SeasonName(home.SeasonTitle);
             season.SetTitle(when == null ? RuText.NewEpisodes : RuText.NewEpisodes + " · " + when);
             season.SetItems(Posters(home.Season));
-            DevLog.Write("home: continue " + active.Count + ", stale " + old.Count + ", season " + season.Items.Count + (app.User == null ? " (гость)" : ""));
+            DevLog.Write("home: " + (fresh ? "сайт" : "кеш") + ", continue " + active.Count + ", stale " + old.Count + ", season " + season.Items.Count +
+                (app.User == null ? " (гость)" : ""));
 
-            focusRow = FirstRow();
+            // Впервые — фокус на первый ряд; при обновлении остаёмся где были, если ряд не опустел.
+            if (!rendered || (focusRow >= 0 && rows[focusRow].IsEmpty)) focusRow = FirstRow();
+            rendered = true;
             ApplyFocus();
             if (app.PendingToast != null) { Toast.Show(ui, app.PendingToast); app.PendingToast = null; }
             CheckNewEpisodes(active);
             LoadExtras();
         }
 
-        static RowItem ContinueItem(ContinueCard c) => new RowItem
+        RowItem ContinueItem(ContinueCard c) => new RowItem
         {
             Title = c.Title,
             Subtitle = RuText.Episode(c.EpisodeNumber),   // озвучку не пишем: в настройках только её ключ, без названия
             ImageUrl = c.FrameUrl,
             Progress = c.DurationSec > 0 ? c.Progress : -1,
             TimeLabel = c.DurationSec > 0 ? RuText.Time(c.PositionSec) + " / " + RuText.Time(c.DurationSec) : null,
+            Badge = newEpisode.ContainsKey(c.AnimeId) ? RuText.NewEpisodeBadge : null,   // уже знаем — не теряем при перерисовке
             Tag = c,
         };
 
@@ -156,21 +224,22 @@ namespace AnimeGo.Tv
         }
 
         // «Новая серия»: досмотренные почти до конца карточки — есть ли на сайте серия дальше. В фоне, не больше трёх.
+        // /player — через кеш приложения: при обновлении главной из кеша запросы не повторяются.
         void CheckNewEpisodes(IReadOnlyList<ContinueCard> active)
         {
             var n = generation;
-            foreach (var c in active.Where(c => c.Progress >= 0.8).Take(MaxBadgeChecks))
+            foreach (var c in active.Where(c => c.Progress >= 0.8 && !newEpisode.ContainsKey(c.AnimeId)).Take(MaxBadgeChecks))
                 Task.Run(async () =>
                 {
                     try
                     {
-                        var info = await app.Api.PlayerAsync(c.AnimeId).ConfigureAwait(false);
+                        var info = await app.PlayerInfoAsync(c.AnimeId).ConfigureAwait(false);
                         var next = info.Episodes.Where(e => e.Number > c.EpisodeNumber).Select(e => e.Number).DefaultIfEmpty(0).Min();
                         DevLog.Write("badge: anime " + c.AnimeId + " ep " + c.EpisodeNumber + " → " + (next > 0 ? "новая " + next : "нет"));
                         if (next == 0) return;
                         App.Ui(() =>
                         {
-                            var index = cont.Items.ToList().FindIndex(i => i.Tag == c);
+                            var index = cont.Items.ToList().FindIndex(i => i.Tag is ContinueCard k && k.AnimeId == c.AnimeId);
                             if (!alive || n != generation || index < 0 || cont.Items[index].Badge != null) return;
                             newEpisode[c.AnimeId] = next;
                             cont.Items[index].Badge = RuText.NewEpisodeBadge;
@@ -182,32 +251,46 @@ namespace AnimeGo.Tv
                 });
         }
 
-        // Ряды ниже макета — после главной, по очереди, чтобы не мешать ей.
+        // Ряды ниже макета — после главной, по очереди, чтобы не мешать ей. Из кеша — сразу; на сайт — если нет
+        // или старше ExtrasFreshSec.
         void LoadExtras()
         {
             if (extrasStarted) return;
             extrasStarted = true;
+            var needOngoing = !FromCache(ongoing, OngoingKey);
+            var needTop = !FromCache(top, TopKey);
+            if (!needOngoing && !needTop) return;
             Task.Run(async () =>
             {
-                await LoadRow(ongoing, "/anime/status/ongoing", "ongoing").ConfigureAwait(false);
-                await LoadRow(top, "/anime/top-250", "top").ConfigureAwait(false);
+                if (needOngoing) await LoadRow(ongoing, "/anime/status/ongoing", OngoingKey).ConfigureAwait(false);
+                if (needTop) await LoadRow(top, "/anime/top-250", TopKey).ConfigureAwait(false);
             });
         }
 
-        async Task LoadRow(Row row, string url, string name)
+        // true — ряд показан из кеша и он свежий; показан, но устарел — false (перезапросим, экран не трогаем).
+        bool FromCache(Row row, string key)
+        {
+            if (!app.Cache.TryGet(key, out IReadOnlyList<AnimeCard> cards, out var age)) return false;
+            row.SetItems(Posters(cards));
+            Layout();
+            return age < ExtrasFreshSec;
+        }
+
+        async Task LoadRow(Row row, string url, string key)
         {
             try
             {
                 var cards = CatalogParser.Cards(await app.Api.GetHtmlAsync(url).ConfigureAwait(false));
-                DevLog.Write("home: " + name + " " + cards.Count);
+                DevLog.Write("home: " + key + " " + cards.Count);
                 App.Ui(() =>
                 {
+                    app.Cache.Put(key, cards);
                     if (!alive) return;
                     row.SetItems(Posters(cards));
                     Layout();
                 });
             }
-            catch (Exception e) { DevLog.Write("home: " + name + " " + e.GetType().Name + " " + e.Message); }
+            catch (Exception e) { DevLog.Write("home: " + key + " " + e.GetType().Name + " " + e.Message); }
         }
 
         // ---- раскладка и фокус ----
@@ -322,10 +405,12 @@ namespace AnimeGo.Tv
             app.User = null;
             app.Prefs.Cookies = null;
             app.SavePrefs();
+            app.ForgetUserData();
             generation++;   // ответы «Новой серии» для прежнего аккаунта больше не нужны
             newEpisode.Clear();
             cont.SetItems(new RowItem[0]);
             stale.SetItems(new RowItem[0]);
+            headerName = null;
             header.Build(null);
             focusRow = FirstRow();   // фокус был на шапке («Выйти»): на первый непустой ряд, как после загрузки
             ApplyFocus();

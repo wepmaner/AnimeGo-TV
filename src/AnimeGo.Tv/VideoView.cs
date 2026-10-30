@@ -23,6 +23,7 @@ namespace AnimeGo.Tv
         public async Task PlayAsync(string url, int startSec)
         {
             Stop();
+            FlushLate();   // плеер прошлого экрана, если ещё не освобождён: двум сразу дисплей не дать
             var p = new Player();
             player = p;
             p.ErrorOccurred += (s, e) => FireError(p, "error " + e.Error);
@@ -164,6 +165,11 @@ namespace AnimeGo.Tv
             seekTarget = null;
             seekOwner = null;
             if (p == null) return;
+            Free(p);
+        }
+
+        static void Free(Player p)
+        {
             try
             {
                 if (p.State == PlayerState.Playing || p.State == PlayerState.Paused) p.Stop();
@@ -171,6 +177,38 @@ namespace AnimeGo.Tv
             }
             catch (InvalidOperationException) { }
             p.Dispose();
+        }
+
+        // Уход с экрана плеера. Dispose гасит видеоплоскость сразу, а следующий экран EFL нарисует только после этого
+        // обработчика — на экране мелькал чёрный кадр. Поэтому сейчас только пауза (звук стихает, кадр остаётся под
+        // непрозрачным фоном нового экрана), а освобождение — через LateSec. Делегат таймера — в статическом поле:
+        // VideoView к тому времени уже никто не держит, и GC собрал бы его вместе с таймером.
+        const double LateSec = 0.4;
+        static Player late;
+        static Func<bool> lateTick;
+        static IntPtr lateTimer;
+
+        public void Release()
+        {
+            var p = player;
+            player = null;
+            seekTarget = null;
+            seekOwner = null;
+            if (p == null) return;
+            FlushLate();
+            try { if (p.State == PlayerState.Playing) p.Pause(); } catch (Exception) { }
+            late = p;
+            lateTick = () => { lateTimer = IntPtr.Zero; FlushLate(); return false; };
+            lateTimer = EcoreMainloop.AddTimer(LateSec, lateTick);
+        }
+
+        // Освободить отложенный плеер сейчас (с UI-потока).
+        static void FlushLate()
+        {
+            var p = late;
+            late = null;
+            if (lateTimer != IntPtr.Zero) { EcoreMainloop.RemoveTimer(lateTimer); lateTimer = IntPtr.Zero; }
+            if (p != null) Free(p);
         }
 
         public void Dispose() => Stop();

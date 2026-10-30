@@ -51,8 +51,29 @@ namespace AnimeGo.Tv
             step = CardW + (width - cols * CardW) / (cols - 1);
         }
 
-        // Где кончается последняя строка на экране (под ней — «Загрузка…»).
+        // Где кончается последняя строка на экране (под ней — спиннер догрузки).
         public int EndY => Top + (RowCount - firstRow) * Pitch - 34;
+
+        // Скелетон на месте первых двух строк, пока ждём сайт; Append его убирает.
+        Skeleton skeleton;
+
+        public void ShowSkeleton()
+        {
+            if (skeleton == null)
+            {
+                skeleton = new Skeleton(ui);
+                for (var r = 0; r < 2; r++)
+                    for (var c = 0; c < Cols; c++)
+                    {
+                        int x = Left + c * step, y = Top + r * Pitch;
+                        skeleton.Add(x, y, CardW, CardH, Radius);
+                        skeleton.Line(x, y + CardH + 14, CardW * (c % 2 == 0 ? 3 : 2) / 4, 22);
+                    }
+            }
+            skeleton.Show();
+        }
+
+        public void HideSkeleton() => skeleton?.Hide();
 
         public void Clear()
         {
@@ -68,6 +89,7 @@ namespace AnimeGo.Tv
         // Дописать карточки в конец (следующая страница каталога).
         public void Append(IReadOnlyList<RowItem> items)
         {
+            HideSkeleton();
             if (frame == null) frame = ui.RoundFocus(0, 0, CardW, CardH, Radius);   // до карточек — чтобы лежала под ними
             foreach (var it in items)
             {

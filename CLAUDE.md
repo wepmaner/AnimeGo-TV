@@ -57,3 +57,10 @@ Samsung UE50TU7140 (2020, Tizen 5.5), `192.168.0.16`, режим разрабо�
 - **Значок приложения — в `src/AnimeGo.Tv/shared/res/animego.png`**: `<icon>` манифеста ищется в `shared/res/` пакета, из `res/` ТВ его не берёт (до 1.0.4 значка на ТВ не было). Копия в `res/` — для экрана входа.
 - Значок рисуется из `design/logo/animego-icon.svg`, PNG 512×512 получен через `msedge --headless --screenshot` (других растеризаторов на ПК нет). Значок кешируется ТВ: после смены поднять `version`, `sdb uninstall ru.animego.tv` (стирает вход), `deploy.sh Release`.
 - `dotnet build` ругается NU1902/NU1903 на `SixLabors.ImageSharp` 2.1.9 (NuGet, не C#); предупреждений компилятора 0.
+- **Экраны не живут между переходами** (`App.Back` пересоздаёт их), поэтому разобранные ответы сайта лежат в `App.Cache`
+  (`DataCache` в Core, память процесса, ≤120 записей) — см. `docs/superpowers/specs/2026-10-30-cache-skeletons-design.md`.
+  Экран рисуется из кеша сразу, устаревшее перепроверяется в фоне; впервые — `Skeleton` (пульсирующие заглушки), не «Загрузка…».
+  Общие запросы — `app.PlayerInfoAsync`/`AnimeInfoAsync`/`EpisodeVideosAsync`, а не `app.Api.*` напрямую. `Episode.Watched`
+  плеер ставит на общих объектах, так что кеш `/player` после просмотра не врёт. Вход/выход/протухшие куки — `ForgetUserData`.
+- Кеш картинок (`DirectoryInfo.Cache`) чистится при старте в фоне: больше 120 МБ → удаляются давно не показывавшиеся до 90 МБ
+  (время записи файла обновляется при показе). Версия приложения — в `tizen-manifest.xml` **и** `Stash.Version` (тест сверяет).

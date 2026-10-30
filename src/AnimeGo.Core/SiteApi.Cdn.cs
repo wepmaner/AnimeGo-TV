@@ -36,6 +36,13 @@ namespace AnimeGo.Core
             catch (ApiException) { return null; }
         }
 
+        // Кадр серии со страницы плеера Kodik или null.
+        public async Task<string> KodikThumbAsync(string playerUrl)
+        {
+            try { return Kodik.ParseThumbnail(await GetHtmlAsync(playerUrl).ConfigureAwait(false)); }
+            catch (ApiException) { return null; }
+        }
+
         public async Task<StreamSet> AniboomStreamsAsync(VideoSource s) =>
             AniboomParser.Parse(await GetHtmlAsync(AniboomParser.EmbedUrl(s.PlayerUrl)).ConfigureAwait(false));
 

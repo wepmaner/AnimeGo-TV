@@ -40,6 +40,8 @@ namespace AnimeGo.Tv
         readonly List<(Part Part, int Card)> reviewParts = new List<(Part, int)>();
         readonly List<Zone> zones = new List<Zone>();
         readonly List<(Btn Kind, int X, int W)> buttons = new List<(Btn, int, int)>();
+        const int FreshSec = 600;   // страница тайтла из кеша без перепроверки
+        readonly Skeleton skeleton;
         MessageView overlay;
         ReaderView reader;
         GalleryView gallery;
@@ -49,6 +51,9 @@ namespace AnimeGo.Tv
         int zone, button, reviewFocus, reviewOffset, reviewsY, aboutY, aboutBottom, scheduleY, scheduleBottom, scrollY, resumeEp;
         bool alive, busy, longDesc;
 
+        string CacheKey => "title:" + url;
+        string ResumeKey => "resume:" + id;
+
         public TitleScreen(App app, int animeId, string url, ContinueCard siteResume = null)
         {
             this.siteResume = siteResume;
@@ -57,6 +62,17 @@ namespace AnimeGo.Tv
             this.url = url;
             ui = new Widgets(app.Win);
             ui.Rect(0, 0, Theme.W, Theme.H, Theme.Bg);
+            // Скелетон шапки: постер, строки текста, чипы жанров, описание, кнопки — на своих местах.
+            skeleton = new Skeleton(ui)
+                .Add(Theme.Margin, HeroY, PosterW, PosterH, 16)
+                .Line(TextX, HeroY + 2, 360, 26)
+                .Add(TextX, HeroY + 40, 900, 60, 12)
+                .Line(TextX, HeroY + 116, 500, 26)
+                .Add(TextX, HeroY + 170, 120, 48, 12)
+                .Line(TextX + 140, HeroY + 180, 620, 28);
+            for (var i = 0; i < 5; i++) skeleton.Add(TextX + i * 132, HeroY + 240, 120, 42, 21);
+            for (var i = 0; i < DescLines; i++) skeleton.Line(TextX, DescY + i * DescLineH + 5, i == DescLines - 1 ? 760 : TextW, 24);
+            skeleton.Add(TextX, BtnY, 260, BtnH, BtnH / 2).Add(TextX + 260 + BtnGap, BtnY, 200, BtnH, BtnH / 2);
         }
 
         public void Show()
@@ -68,6 +84,7 @@ namespace AnimeGo.Tv
         public void Hide()
         {
             alive = false;
+            skeleton.Hide();
             reader?.Hide();
             gallery?.Hide();
             overlay?.Hide();
@@ -101,9 +118,13 @@ namespace AnimeGo.Tv
 
         // ---- данные ----
 
+        // Страница из кеша — сразу; впервые — скелетон. Устаревшую запись обновляем в фоне только в кеше:
+        // перестройка собрала бы экран заново и сбила прокрутку, а данные тайтла меняются редко.
         void Load()
         {
-            ShowOverlay(new MessageView(app, RuText.Loading, null, app.Back));
+            var hit = app.Cache.TryGet(CacheKey, out AnimeInfo cached, out var age);
+            if (hit) { DevLog.Write("title: " + id + " кеш, " + (int)age + " с"); Render(cached); if (age < FreshSec) return; }
+            else skeleton.Show();
             Task.Run(async () =>
             {
                 AnimeInfo a = null;
@@ -112,20 +133,30 @@ namespace AnimeGo.Tv
                 catch (Exception e) { why = Why(e); }
                 App.Ui(() =>
                 {
+                    if (a != null) app.Cache.Put(CacheKey, a);
                     if (!alive) return;
                     if (a == null)
                     {
                         DevLog.Write("title: " + id + " ошибка " + why);
+                        if (hit) return;
+                        skeleton.Hide();
                         ShowOverlay(new MessageView(app, RuText.NoConnection, Load, app.Back));
                         return;
                     }
                     DevLog.Write("title: " + id + " ok, related " + a.Related.Count + ", кадров " + a.Screenshots.Count + ", рецензий " + a.Reviews.Count);
-                    ShowOverlay(null);
-                    info = a;
-                    Build();
-                    ResolveInBackground();
+                    if (info == null) Render(a);
                 });
             });
+        }
+
+        void Render(AnimeInfo a)
+        {
+            skeleton.Hide();
+            ShowOverlay(null);
+            info = a;
+            if (app.Cache.TryGet(ResumeKey, out int ep, out _)) resumeEp = ep;   // кнопка сразу с номером; перепроверим
+            Build();
+            ResolveInBackground();
         }
 
         // Номер серии для «Смотреть · серия N» — заранее, чтобы кнопка сразу его показывала.
@@ -134,7 +165,7 @@ namespace AnimeGo.Tv
             var ep = await ResolveAsync().ConfigureAwait(false);
             App.Ui(() =>
             {
-                if (!alive || ep == 0) return;
+                if (!alive || ep == 0 || ep == resumeEp) return;
                 resumeEp = ep;
                 BuildButtons();
                 Place();
@@ -142,18 +173,20 @@ namespace AnimeGo.Tv
         });
 
         // Серия, с которой продолжать: по отметкам «просмотрено» из /player и ответу continuation сайта
-        // (PlayerInfo.ResumeEpisode). 0 — нет связи.
+        // (PlayerInfo.ResumeEpisode). 0 — нет связи. /player — через кеш приложения (отметки плеер ставит на общих
+        // объектах), continuation — всегда с сайта: он зависит от позиции.
         async Task<int> ResolveAsync()
         {
             try
             {
-                var player = await app.Api.PlayerAsync(id).ConfigureAwait(false);
+                var player = await app.PlayerInfoAsync(id).ConfigureAwait(false);
                 int? site = null;
                 if (!string.IsNullOrEmpty(player.ContinuationUrl))
                     site = PlayerParser.ParseContinuation(await app.Api.GetAjaxAsync(player.ContinuationUrl).ConfigureAwait(false));
                 var ep = player.ResumeEpisode(site);
                 DevLog.Write("title: continuation " + (site?.ToString() ?? "нет") + ", просмотрено " + player.Episodes.Count(e => e.Watched) +
                     " из " + player.Episodes.Count + " → серия " + ep);
+                app.Cache.Put(ResumeKey, ep);
                 return ep;
             }
             catch (Exception e)

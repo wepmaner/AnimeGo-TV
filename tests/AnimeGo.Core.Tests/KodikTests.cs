@@ -14,6 +14,15 @@ namespace AnimeGo.Core.Tests
         }
 
         [Fact]
+        public void ParseThumbnail_MiddleByName()
+        {
+            var t = Kodik.ParseThumbnail(Fixture.Read("kodik_seria.html"));
+            Assert.StartsWith("https://cloud2.solodcdn.com/", t);
+            Assert.EndsWith("/thumb003.jpg", t);   // из thumb001…thumb005 — средний
+            Assert.Null(Kodik.ParseThumbnail("<html></html>"));
+        }
+
+        [Fact]
         public void Form_FromPage()
         {
             var f = Kodik.Form(Fixture.Read("kodik_seria.html")).ToDictionary(p => p.Key, p => p.Value);

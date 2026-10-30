@@ -26,14 +26,15 @@ namespace AnimeGo.Tv
 
         public int Focus { get; private set; }
 
-        public HomeHeader(Widgets ui, string userName)
+        public HomeHeader(Widgets ui, string userName, bool pending = false)
         {
             this.ui = ui;
-            Build(userName);
+            Build(userName, pending);
         }
 
-        // userName null — гость («Войти»).
-        public void Build(string userName)
+        // userName null — гость («Войти»); pending — куки есть, но сайт ещё не ответил, кто мы: на месте имени
+        // серая заглушка, чтобы «Войти» не мигало перед именем.
+        public void Build(string userName, bool pending = false)
         {
             foreach (var o in parts) ui.Remove(o);
             parts.Clear();
@@ -67,6 +68,15 @@ namespace AnimeGo.Tv
                 var letter = userName.Length > 0 ? userName.Substring(0, 1).ToUpperInvariant() : "?";
                 parts.Add(ui.Text(ax, ay + 8, 44, 32, Theme.T(letter, 20, bold: true, align: "center")));
                 parts.Add(ui.Text(nx, ay + 8, nameW + 20, 32, Theme.T(userName, 20, Theme.MutedHex)));
+                slots.Add(new Slot { X = ax, Y = ay, W = 44 + 12 + nameW, H = 44 });
+            }
+            else if (pending)
+            {
+                const int nameW = 120, ay = Top + (H - 44) / 2;
+                var nx = Theme.W - Theme.Margin - nameW;
+                var ax = nx - 12 - 44;
+                parts.Add(ui.Circle(ax + 22, ay + 22, 22, Avatar));
+                parts.Add(ui.RoundRect(nx, ay + 12, nameW, 20, 10, Avatar));
                 slots.Add(new Slot { X = ax, Y = ay, W = 44 + 12 + nameW, H = 44 });
             }
             else
