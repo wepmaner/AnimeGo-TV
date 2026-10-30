@@ -40,7 +40,7 @@ namespace AnimeGo.Tv
                 p.UserAgent = SiteApi.UserAgent;
                 p.SetSource(new MediaUriSource(url));
                 // Короткий стартовый буфер: иначе плеер несколько секунд копит поток перед первым кадром.
-                try { p.BufferingTime = new PlayerBufferingTime(PreBufferMs, ReBufferMs); }
+                try { SetBufferingTime(p); }
                 catch (Exception e) { DevLog.Write("buffering time: " + e.Message); }
                 await p.PrepareAsync();
                 await OnUi();
@@ -60,6 +60,16 @@ namespace AnimeGo.Tv
             {
                 FireError(p, "prepare " + e.GetType().Name + " " + e.Message);
             }
+        }
+
+        // Player.BufferingTime и PlayerBufferingTime появились в API 5, а собираемся под API 4 (Tizen 4.0 у части
+        // телевизоров), поэтому — через отражение: на Tizen 5.5 буфер ставится как раньше, на 4.0 плеер копит поток по-своему.
+        static void SetBufferingTime(Player p)
+        {
+            var prop = typeof(Player).GetProperty("BufferingTime");
+            var type = typeof(Player).Assembly.GetType("Tizen.Multimedia.PlayerBufferingTime");
+            if (prop == null || type == null) { DevLog.Write("buffering time: нет в этом Tizen"); return; }
+            prop.SetValue(p, Activator.CreateInstance(type, PreBufferMs, ReBufferMs));
         }
 
         // Продолжить на UI-потоке: состояние плеера и перемотки трогаем только оттуда, не полагаясь на SynchronizationContext.

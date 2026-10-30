@@ -36,7 +36,7 @@
 
 - Windows с Git Bash, .NET SDK и workload Tizen для .NET (`Tizen.NET.Sdk`).
 - `sdb` из Tizen Studio или tizen-tools (в Git Bash нужен `MSYS_NO_PATHCONV=1`).
-- Телевизор Samsung на Tizen в той же сети. Проверено на UE50TU7140 (2020, Tizen 5.5).
+- Телевизор Samsung на Tizen в той же сети. Собрано под Tizen API 4 (телевизоры с 2018 года); проверено на UE50TU7140 (2020, Tizen 5.5).
 
 ## Установка на телевизор
 

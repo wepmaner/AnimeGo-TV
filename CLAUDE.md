@@ -18,7 +18,7 @@
 
 ## Стек (как в `C:\Users\Ruslan\Desktop\projects\domofon`)
 
-- **Tizen .NET (C#)**, UI на ElmSharp, `Tizen.NET.Sdk/1.2.1`, `tizen60`, LangVersion 8.0.
+- **Tizen .NET (C#)**, UI на ElmSharp, `Tizen.NET.Sdk/1.2.1`, `tizen40` (API 4 — см. грабли про Tizen 4.0), LangVersion 8.0.
 - Почему не HTML/JS: веб-движок не даёт ставить свои `Cookie`/`Referer`/`User-Agent`, а для авторизации и видеоплееров они нужны. В .NET запросы полностью под нашим контролем, а видео (HLS) воспроизводит встроенный плеер ТВ.
 - Устройство как в домофоне:
   - `src/AnimeGo.Core` — логика без UI (netstandard2.0, **без NuGet-пакетов**, JSON через `DataContractJsonSerializer`): запросы, разбор HTML/JSON, модели.
@@ -62,5 +62,11 @@ Samsung UE50TU7140 (2020, Tizen 5.5), `192.168.0.16`, режим разрабо�
   Экран рисуется из кеша сразу, устаревшее перепроверяется в фоне; впервые — `Skeleton` (пульсирующие заглушки), не «Загрузка…».
   Общие запросы — `app.PlayerInfoAsync`/`AnimeInfoAsync`/`EpisodeVideosAsync`, а не `app.Api.*` напрямую. `Episode.Watched`
   плеер ставит на общих объектах, так что кеш `/player` после просмотра не врёт. Вход/выход/протухшие куки — `ForgetUserData`.
+- **Собираемся под API 4 (`tizen40`, Tizen.NET 4.0.1.14164, `api-version="4"` в манифесте)**: у телевизоров 2018 года
+  Tizen 4.0, и пакет с `api-version="6"` они отвергают (`processing result : Operation not allowed [-4] failed`, 2026-10-31,
+  вывод там от `pkgcmd`, а не `wascmd`). Из нашего кода в API 4 нет только `Player.BufferingTime`/`PlayerBufferingTime`
+  (API 5) — `VideoView.SetBufferingTime` ставит его через отражение. Под API 4 в пакет попадают `System.Memory`,
+  `System.Buffers`, `System.Numerics.Vectors` (для ImageSharp; на Tizen 5.5 они встроенные). Запуск на Tizen 4.0 ещё не
+  подтверждён: старый .NET там может не поднять ImageSharp (тогда без постеров, а не падение — `ImageCache` ловит).
 - Кеш картинок (`DirectoryInfo.Cache`) чистится при старте в фоне: больше 120 МБ → удаляются давно не показывавшиеся до 90 МБ
   (время записи файла обновляется при показе). Версия приложения — в `tizen-manifest.xml` **и** `Stash.Version` (тест сверяет).

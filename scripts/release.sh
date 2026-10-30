@@ -51,7 +51,7 @@ dotnet test tests/AnimeGo.Core.Tests >/dev/null 2>&1 || fail "тесты не п
 echo "• сборка Release"
 rm -rf src/AnimeGo.Tv/bin/Release
 dotnet build src/AnimeGo.Tv -c Release >/dev/null 2>&1 || fail "сборка не удалась (dotnet build src/AnimeGo.Tv -c Release)"
-TPK="src/AnimeGo.Tv/bin/Release/tizen60/$PKG-$VERSION.tpk"
+TPK="src/AnimeGo.Tv/bin/Release/tizen40/$PKG-$VERSION.tpk"
 [ -f "$TPK" ] || fail "нет $TPK"
 
 # 3. Проверки пакета

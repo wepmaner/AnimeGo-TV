@@ -14,7 +14,7 @@ STATUS=0
 dotnet build "$WROOT\src\AnimeGo.Tv" -c "$CONF" "$@" >"$LOG" 2>&1 || STATUS=$?
 grep -E "error|->|Ошибок" "$LOG" || true
 if [ "$STATUS" -ne 0 ]; then echo "Сборка не удалась (код $STATUS)" >&2; exit "$STATUS"; fi
-TPK=$(cygpath -w "$(ls "$ROOT/src/AnimeGo.Tv/bin/$CONF/tizen60/"*.tpk)")
+TPK=$(cygpath -w "$(ls "$ROOT/src/AnimeGo.Tv/bin/$CONF/tizen40/"*.tpk)")
 $SDB connect $TV >/dev/null
 $SDB -s $TV install "$TPK" | tail -1
 $SDB -s $TV shell 0 execute ru.animego.tv | tail -1
